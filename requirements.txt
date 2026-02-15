@@ -1,0 +1,6 @@
+pyautogui
+openpyxl
+pdfminer.six
+pypdf
+
+

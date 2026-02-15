@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+venv/
+.env
+.DS_Store
+targets.json
+results/
+QA_ANALYTICS_RESULTS/
+*.pdf
+*.xlsx
+diff_config.json
