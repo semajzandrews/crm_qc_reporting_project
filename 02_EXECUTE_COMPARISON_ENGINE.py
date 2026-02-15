@@ -3,6 +3,7 @@ import time
 import json
 import os
 import sys
+import platform
 from datetime import datetime
 from pypdf import PdfReader, PdfWriter, PageObject, Transformation
 
@@ -48,34 +49,85 @@ def generate_fallback_pdf(hs_path, sf_path, output_name):
         print(f"   Generation failed: {e}")
 
 def upload_sequence(coords, hs_path, sf_path):
-    """Execute the file upload automation sequence."""
+    """Execute the file upload automation sequence with Cross-Platform support."""
+    is_mac = platform.system() == "Darwin"
+    
     if "COMPARISON_AREA" in coords:
         pyautogui.click(coords["COMPARISON_AREA"])
         time.sleep(0.5)
+        
+    # --- PRIMARY FILE ---
     print("   Uploading primary file...")
     pyautogui.click(coords["LEFT_BROWSE"])
-    time.sleep(3.0) 
-    pyautogui.hotkey('command', 'shift', 'g')
-    time.sleep(1.5)
+    time.sleep(2.0) # Wait for dialog
+    
+    if is_mac:
+        pyautogui.hotkey('command', 'shift', 'g')
+        time.sleep(1.0)
+    
     pyautogui.write(hs_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(1)
+    
+    # --- SECONDARY FILE ---
     print("   Uploading secondary file...")
     pyautogui.click(coords["RIGHT_BROWSE"])
-    time.sleep(3.0)
-    pyautogui.hotkey('command', 'shift', 'g')
-    time.sleep(1.5)
+    time.sleep(2.0)
+    
+    if is_mac:
+        pyautogui.hotkey('command', 'shift', 'g')
+        time.sleep(1.0)
+        
     pyautogui.write(sf_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(1)
+    
     print("   Initializing comparison engine...")
     pyautogui.click(coords["FIND_DIFF_BTN"])
+
+def calibrate_mode():
+    """Interactive wizard to map screen coordinates for the user."""
+    print("\n--- CALIBRATION WIZARD ---")
+    print("You will hover your mouse over specific buttons and press [ENTER] to capture coordinates.")
+    print("Ensure your browser is open to Diffchecker and maximized.")
+    print("Press [Ctrl+C] to abort at any time.\n")
+    
+    targets = [
+        ("COMPARISON_AREA", "Click anywhere in the middle of the page to ensure focus"),
+        ("LEFT_BROWSE", "Left 'Upload' or 'Browse' button"),
+        ("RIGHT_BROWSE", "Right 'Upload' or 'Browse' button"),
+        ("FIND_DIFF_BTN", "The main 'Find Difference' button"),
+        ("EXPORT_BTN", "The 'Export' button (usually top right after diff)"),
+        ("SPLIT_VIEW_BTN", "The 'Split View' option in the export menu"),
+        ("SAVE_BTN", "The 'Save' or 'Download' button in the final dialog"),
+        ("TAB_CLOSE_BTN", "The 'X' to close the current browser tab"),
+        ("TAB_NEW_BTN", "The '+' to open a new browser tab"),
+        ("DOCUMENT_MODE_BTN", "The bookmark or button to return to Diffchecker home")
+    ]
+    
+    new_config = {}
+    
+    try:
+        for key, desc in targets:
+            input(f"👉 Hover over: [{desc}] and press ENTER...")
+            pos = pyautogui.position()
+            new_config[key] = [pos.x, pos.y]
+            print(f"   ✅ Captured {key}: {pos}")
+            time.sleep(0.5)
+            
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(new_config, f, indent=4)
+            
+        print(f"\n✨ Calibration Complete! Config saved to: {CONFIG_FILE}")
+        
+    except KeyboardInterrupt:
+        print("\n\n❌ Calibration Aborted.")
 
 def run_comparison_process(file_pairs):
     """Main execution loop for the comparison process."""
@@ -137,7 +189,7 @@ def run_comparison_process(file_pairs):
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "calibrate":
-        pass 
+        calibrate_mode()
     else:
         # Load targets from centralized configuration
         with open(TARGETS_FILE, "r") as f:

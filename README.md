@@ -39,6 +39,13 @@ python3 01_SYNC_TARGET_FOLDERS.py
 ```bash
 python3 02_EXECUTE_COMPARISON_ENGINE.py
 ```
+**First Run (Calibration):**
+If running on a new machine, you must map your screen coordinates first:
+```bash
+python3 02_EXECUTE_COMPARISON_ENGINE.py calibrate
+```
+*Follow the on-screen wizard to hover over buttons and press Enter.*
+
 **What it does:**
 *   Reads the `targets.json` map.
 *   Automates your web browser to upload each pair to the Diffchecker engine.
