@@ -133,8 +133,8 @@ def calibrate_mode():
         print("\n🚀 Performing Live Upload to transition to Export Screen...")
         upload_sequence(new_config, hs_test_path, sf_test_path)
         
-        print("\n⏳ Waiting 10 seconds for results to load...")
-        time.sleep(10)
+        print("\n⏳ Waiting 5 seconds for results to load...")
+        time.sleep(5)
 
         input("👉 Hover over: [EXPORT_BTN] and press ENTER...")
         pos = pyautogui.position()
@@ -185,7 +185,7 @@ def run_comparison_process(file_pairs):
     for i, (name, files) in enumerate(file_pairs.items()):
         print(f"\n[{i+1}/{len(file_pairs)}] File: {name}")
         upload_sequence(coords, files["hs"], files["sf"])
-        time.sleep(12) 
+        time.sleep(6) 
         pyautogui.click(coords["EXPORT_BTN"])
         time.sleep(1.5)
         pyautogui.click(coords["SPLIT_VIEW_BTN"])
@@ -193,9 +193,7 @@ def run_comparison_process(file_pairs):
         timestamp = datetime.now().strftime("%m%d_%H%M")
         base_name = f"{name}_Comparison_{timestamp}"
         
-        if is_mac:
-            pyautogui.hotkey('command', 'shift', 'g')
-            time.sleep(1.0)
+        # Removed Cmd+Shift+G to keep focus on default highlight
         pyautogui.write(base_name)
         time.sleep(1)
         pyautogui.press('enter')
