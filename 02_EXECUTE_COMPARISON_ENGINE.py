@@ -4,6 +4,8 @@ import json
 import os
 import sys
 import platform
+import tkinter as tk
+from tkinter import simpledialog, messagebox
 from datetime import datetime
 from pypdf import PdfReader, PdfWriter, PageObject, Transformation
 
@@ -130,16 +132,35 @@ def calibrate_mode():
         print(f"\n✨ Setup Complete!")
     except KeyboardInterrupt: print("\nAborted.")
 
-def run_comparison_process(file_pairs):
-    """Main execution loop for the comparison process."""
+def run_comparison_process(config_meta):
+    """Main execution loop with batching support."""
     if not os.path.exists(CONFIG_FILE): return
     with open(CONFIG_FILE, "r") as f: coords = json.load(f)
+    
+    targets_dict = config_meta.get("matches", {})
+    pending_targets = {k: v for k, v in targets_dict.items() if v.get('status_pdf', 'pending') == 'pending'}
+    total_pending = len(pending_targets)
+    
+    if total_pending == 0:
+        messagebox.showinfo("Complete", "No pending PDF comparisons left!")
+        return
+
+    root = tk.Tk()
+    root.withdraw()
+    batch_size = simpledialog.askinteger("Batch Size", 
+                                       f"Total Pending PDFs: {total_pending}\n\nHow many pairs would you like to process?\n(Recommended: 10)", 
+                                       initialvalue=10, minvalue=1, maxvalue=total_pending)
+    if not batch_size: return
+
     is_mac = platform.system() == "Darwin"
     print("\n--- Step 2: Running Comparisons ---")
     time.sleep(3)
 
-    for i, (name, files) in enumerate(file_pairs.items()):
-        print(f"\n[{i+1}/{len(file_pairs)}] File: {name}")
+    processed_count = 0
+    for name, files in pending_targets.items():
+        if processed_count >= batch_size: break
+        
+        print(f"\n[{processed_count+1}/{batch_size}] File: {name}")
         timestamp = datetime.now().strftime("%m%d_%H%M")
         
         is_identical = False
@@ -150,44 +171,51 @@ def run_comparison_process(file_pairs):
             print("   Status: Exact Match found. Generating Local Report...")
             out_name = f"{name}_MATCH_{timestamp}.pdf"
             generate_side_by_side_pdf(files["hs"], files["sf"], out_name)
-            continue
-
-        upload_sequence(coords, files["hs"], files["sf"])
-        time.sleep(6) 
-        pyautogui.click(coords["EXPORT_BTN"])
-        time.sleep(1.5)
-        pyautogui.click(coords["SPLIT_VIEW_BTN"])
-        time.sleep(2.5) 
-        
-        base_name = f"{name}_Comparison_{timestamp}"
-        
-        print(f"   Entering filename: {base_name}")
-        # Focus is already in the field by default on both OS.
-        # Typing immediately ensures the filename is set.
-        pyautogui.write(base_name)
-        time.sleep(2.0) # 2-second wait to let the text and button settle
-        
-        print("   Finalizing export...")
-        pyautogui.click(coords["SAVE_BTN"])
-        time.sleep(5) # Wait for download to finish
-
-        expected_file = os.path.join(DOWNLOADS_DIR, base_name + ".pdf")
-        if os.path.exists(expected_file):
-            os.rename(expected_file, os.path.join(RESULTS_DIR, base_name + ".pdf"))
         else:
-            print("   ⚠️ Export failed. Generating Local Fallback...")
-            out_name = f"{name}_Comparison_{timestamp}.pdf"
-            generate_side_by_side_pdf(files["hs"], files["sf"], out_name)
+            upload_sequence(coords, files["hs"], files["sf"])
+            time.sleep(6) 
+            pyautogui.click(coords["EXPORT_BTN"])
+            time.sleep(1.5)
+            pyautogui.click(coords["SPLIT_VIEW_BTN"])
+            time.sleep(2.5) 
+            
+            base_name = f"{name}_Comparison_{timestamp}"
+            pyautogui.write(base_name)
+            time.sleep(2.0)
+            pyautogui.click(coords["SAVE_BTN"])
+            time.sleep(5)
 
-        pyautogui.click(coords["TAB_CLOSE_BTN"]); time.sleep(1)
-        pyautogui.click(coords["TAB_NEW_BTN"]); time.sleep(2)
-        pyautogui.click(coords["DOCUMENT_MODE_BTN"]); time.sleep(2)
+            expected_file = os.path.join(DOWNLOADS_DIR, base_name + ".pdf")
+            if os.path.exists(expected_file):
+                os.rename(expected_file, os.path.join(RESULTS_DIR, base_name + ".pdf"))
+            else:
+                print("   ⚠️ Export failed. Generating Local Fallback...")
+                out_name = f"{name}_Comparison_{timestamp}.pdf"
+                generate_side_by_side_pdf(files["hs"], files["sf"], out_name)
+
+            pyautogui.click(coords["TAB_CLOSE_BTN"]); time.sleep(1)
+            pyautogui.click(coords["TAB_NEW_BTN"]); time.sleep(2)
+            pyautogui.click(coords["DOCUMENT_MODE_BTN"]); time.sleep(2)
+
+        # Update status in config
+        targets_dict[name]['status_pdf'] = 'completed'
+        config_meta['matches'] = targets_dict
+        with open(TARGETS_FILE, "w") as f:
+            json.dump(config_meta, f, indent=4)
+        
+        processed_count += 1
+
+    summary_msg = f"PDF Batch Complete!\n\nProcessed: {processed_count}\nRemaining: {total_pending - processed_count}"
+    print(f"\n{summary_msg}")
+    messagebox.showinfo("Batch Complete", summary_msg)
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "calibrate":
         calibrate_mode()
     else:
+        if not os.path.exists(TARGETS_FILE):
+            print("Error: targets.json not found. Run Script 01 first.")
+            sys.exit(1)
         with open(TARGETS_FILE, "r") as f:
             meta = json.load(f)
-            targets = meta.get("matches", {})
-        run_comparison_process(targets)
+        run_comparison_process(meta)

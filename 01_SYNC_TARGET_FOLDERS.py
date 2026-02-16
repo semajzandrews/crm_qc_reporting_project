@@ -61,7 +61,8 @@ def synchronize_file_targets():
         matches[filename] = {
             "hs": os.path.join(RESULTS_MATCH_HS, filename),
             "sf": os.path.join(RESULTS_MATCH_SF, filename),
-            "status": "pending"
+            "status_pdf": "pending",
+            "status_excel": "pending"
         }
         shutil.move(os.path.join(hs_dir, filename), os.path.join(RESULTS_MATCH_HS, filename))
         shutil.move(os.path.join(sf_dir, filename), os.path.join(RESULTS_MATCH_SF, filename))
@@ -90,8 +91,9 @@ def synchronize_file_targets():
         if hs_count == 1 and sf_count == 1:
             matches[base] = {
                 "hs": os.path.join(RESULTS_MATCH_HS, hs_filename),
-                "sf": os.path.join(RESULTS_MATCH_SF, sf_filename),
-                "status": "pending"
+                "sf": os.path.join(RESULTS_MATCH_SF, hs_filename),
+                "status_pdf": "pending",
+                "status_excel": "pending"
             }
             shutil.move(os.path.join(hs_dir, hs_filename), os.path.join(RESULTS_MATCH_HS, hs_filename))
             shutil.move(os.path.join(sf_dir, sf_filename), os.path.join(RESULTS_MATCH_SF, sf_filename))

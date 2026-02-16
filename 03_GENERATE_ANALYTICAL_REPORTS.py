@@ -132,15 +132,15 @@ def generate_final_analytics():
     root = tk.Tk()
     root.withdraw()
     
-    pending_targets = {k: v for k, v in TARGETS_DICT.items() if v.get('status') == 'pending'}
+    pending_targets = {k: v for k, v in TARGETS_DICT.items() if v.get('status_excel', 'pending') == 'pending'}
     total_pending = len(pending_targets)
     
     if total_pending == 0:
-        messagebox.showinfo("Complete", "No pending pairs left to process!")
+        messagebox.showinfo("Complete", "No pending Excel analytical entries left!")
         return
 
     batch_size = simpledialog.askinteger("Batch Size", 
-                                       f"Total Pending: {total_pending}\n\nHow many pairs would you like to process?\n(Recommended: 10)", 
+                                       f"Total Pending Excel Entries: {total_pending}\n\nHow many entries would you like to process?\n(Recommended: 10)", 
                                        initialvalue=10, minvalue=1, maxvalue=total_pending)
     if not batch_size: return
 
@@ -167,7 +167,7 @@ def generate_final_analytics():
                                    hs_path=paths['hs'], sf_path=paths['sf'], client_lines=client_lines):
             
             # Update status in config to prevent re-processing
-            TARGETS_DICT[client_name]['status'] = 'completed'
+            TARGETS_DICT[client_name]['status_excel'] = 'completed'
             config_meta['matches'] = TARGETS_DICT
             with open(TARGETS_FILE, "w") as f:
                 json.dump(config_meta, f, indent=4)
@@ -180,7 +180,7 @@ def generate_final_analytics():
             current_row += 1
             processed_count += 1
 
-    summary_msg = f"Batch Complete!\n\nProcessed: {processed_count}\nRemaining: {total_pending - processed_count}"
+    summary_msg = f"Excel Batch Complete!\n\nProcessed: {processed_count}\nRemaining: {total_pending - processed_count}"
     print(f"\n{summary_msg}")
     messagebox.showinfo("Batch Complete", summary_msg)
 
