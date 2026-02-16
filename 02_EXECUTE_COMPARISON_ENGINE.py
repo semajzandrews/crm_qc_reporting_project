@@ -94,8 +94,7 @@ def upload_sequence(coords, hs_path, sf_path):
 def calibrate_mode():
     """Map screen coordinates for automation with live execution during setup."""
     print("\n--- LIVE CALIBRATION SETUP ---")
-    print("This mode will execute buttons as you capture them to reach the Export screen.")
-    print("Ensure the browser is open and visible.")
+    print("Selecting a non-identical pair to ensure the Export button is active...")
     
     if not os.path.exists(TARGETS_FILE):
         print("Error: targets.json not found. Run Script 01 first.")
@@ -107,9 +106,29 @@ def calibrate_mode():
         if not matches:
             print("Error: No file pairs found.")
             return
-        first_key = list(matches.keys())[0]
-        hs_test_path = matches[first_key]["hs"]
-        sf_test_path = matches[first_key]["sf"]
+
+        # Find two files that are DIFFERENT to enable the Export button
+        test_hs = ""
+        test_sf = ""
+        found_diff = False
+        
+        for name, paths in matches.items():
+            try:
+                with open(paths['hs'], 'rb') as f1, open(paths['sf'], 'rb') as f2:
+                    if f1.read() != f2.read():
+                        test_hs = paths['hs']
+                        test_sf = paths['sf']
+                        found_diff = True
+                        print(f"   Using non-identical pair: {name}")
+                        break
+            except Exception:
+                continue
+        
+        if not found_diff:
+            print("   ⚠️ No discrepancies found in matches. Using first available pair.")
+            first_key = list(matches.keys())[0]
+            test_hs = matches[first_key]["hs"]
+            test_sf = matches[first_key]["sf"]
 
     new_config = {}
     try:
@@ -131,7 +150,7 @@ def calibrate_mode():
         new_config["FIND_DIFF_BTN"] = [pos.x, pos.y]
 
         print("\n🚀 Performing Live Upload to transition to Export Screen...")
-        upload_sequence(new_config, hs_test_path, sf_test_path)
+        upload_sequence(new_config, test_hs, test_sf)
         
         print("\n⏳ Waiting 5 seconds for results to load...")
         time.sleep(5)
@@ -184,6 +203,13 @@ def run_comparison_process(file_pairs):
 
     for i, (name, files) in enumerate(file_pairs.items()):
         print(f"\n[{i+1}/{len(file_pairs)}] File: {name}")
+        
+        # Binary check to skip Diffchecker if identical (saves time/bandwidth)
+        with open(files["hs"], 'rb') as f1, open(files["sf"], 'rb') as f2:
+            if f1.read() == f2.read():
+                print("   Status: Exact match identified. Skipping Diffchecker...")
+                continue
+
         upload_sequence(coords, files["hs"], files["sf"])
         time.sleep(6) 
         pyautogui.click(coords["EXPORT_BTN"])
@@ -193,7 +219,6 @@ def run_comparison_process(file_pairs):
         timestamp = datetime.now().strftime("%m%d_%H%M")
         base_name = f"{name}_Comparison_{timestamp}"
         
-        # Removed Cmd+Shift+G to keep focus on default highlight
         pyautogui.write(base_name)
         time.sleep(1)
         pyautogui.press('enter')
