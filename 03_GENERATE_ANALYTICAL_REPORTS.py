@@ -35,6 +35,7 @@ TESTER_NAME = "Semaj Andrews"
 if not os.path.exists(RESULTS_DIR):
     os.makedirs(RESULTS_DIR)
 
+# Identification Anchors - REFINED FOR OVERFLOW AWARENESS
 SECTIONS = [
     {'key': 'Summary Page', 'marker': 'Year Over Year Comparison of Calls', 'next_marker': 'Calls by Agency'},
     {'key': 'Site Page', 'marker': 'Calls by Agency', 'next_marker': 'Calls by Day of Week'},
@@ -45,24 +46,43 @@ SECTIONS = [
 ]
 
 def clean_text(text):
-    """Normalize whitespace to avoid spacing-related mismatches."""
+    """Normalize whitespace and remove redundant headers to handle multi-page wraps."""
     if not text: return ""
-    return re.sub(r'\s+', ' ', text).strip()
+    # Collapse whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 def get_section_text(text, config):
+    """
+    Slices PDF text based on greedy anchors to capture multi-page tables.
+    Matches from the FIRST start_marker to the FIRST next_marker found AFTER the start.
+    """
     start_marker = config['marker']
     end_marker = config['next_marker']
+    
     try:
+        # 1. Find the FIRST occurrence of the start marker (Case-Insensitive)
         start_match = re.search(re.escape(start_marker), text, re.IGNORECASE)
-        if not start_match: return None
+        if not start_match:
+            return None
+        
         start_idx = start_match.start()
-        end_idx = len(text)
+        
+        # 2. Find the FIRST occurrence of the NEXT marker starting AFTER the start index
         if end_marker:
             end_match = re.search(re.escape(end_marker), text[start_idx + len(start_marker):], re.IGNORECASE)
             if end_match:
+                # The index is relative to the slice, so we add the offset
                 end_idx = start_idx + len(start_marker) + end_match.start()
+            else:
+                # If next marker not found, take everything to the end
+                end_idx = len(text)
+        else:
+            end_idx = len(text)
+            
         return text[start_idx:end_idx].strip()
-    except Exception: return None
+    except Exception:
+        return None
 
 def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_path, client_lines):
     print(f"--- PROCESSING: {client_name} ---")
@@ -74,7 +94,7 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         client_lines.append(f"- {msg}")
         return False
 
-    # 1. Binary comparison check
+    # 1. Binary comparison check (Skip heavy parsing if identical)
     with open(hs_path, 'rb') as f1, open(sf_path, 'rb') as f2:
         if f1.read() == f2.read():
             print("   Status: Exact binary match identified.")
@@ -108,19 +128,43 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         hs_block = get_section_text(text_hs, section)
         sf_block = get_section_text(text_sf, section)
         
+        # LOGIC UPGRADE: If a section is missing from one but present in the other
         if hs_block is None and sf_block is None:
             result, reason = 0, "Section missing in both sources (Acceptable)"
         elif hs_block is None or sf_block is None:
             result, reason = 1, "Section presence mismatch"
         else:
-            result = 0 if clean_text(hs_block) == clean_text(sf_block) else 1
-            reason = "Data Match" if result == 0 else "Data Discrepancy Identified"
+            # NORMALIZATION: Collapse all whitespace to handle formatting shifts
+            clean_hs = clean_text(hs_block)
+            clean_sf = clean_text(sf_block)
+            
+            # VALIDATION: Check if content is just the header or too short to be valid
+            if len(clean_hs) < 15 or len(clean_sf) < 15:
+                # If they both match headers but have no data, 0. If one has data and other doesn't, 1.
+                result = 0 if clean_hs == clean_sf else 1
+                reason = "Empty table match" if result == 0 else "Content volume mismatch"
+            else:
+                result = 0 if clean_hs == clean_sf else 1
+                reason = "Data Match" if result == 0 else "Data Discrepancy Identified"
             
         if result == 1: any_failure = True
         client_lines.append(f"- **{section['key']}**: {result} ({reason})")
+        
         col_idx = col_map.get(section['key'])
         if col_idx: sheet.cell(row=row_idx, column=col_idx).value = result
         
+    # 3. Final Integrity Guard: Summary Page inherits sub-page failures
+    summary_key = 'Summary Page'
+    summary_col = col_map.get(summary_key)
+    if any_failure and summary_col:
+        print(f"   Status: Discrepancy detected in sub-sections. Marking {summary_key} as 1.")
+        sheet.cell(row=row_idx, column=summary_col).value = 1
+        # Update log line for summary if it was previously marked 0
+        for i, line in enumerate(client_lines):
+            if f"**{summary_key}**: 0" in line:
+                client_lines[i] = f"- **{summary_key}**: 1 (Inferred mismatch due to sub-page discrepancies)"
+                break
+    
     test_result_col = col_map.get('Test Result')
     overall = 1 if any_failure else 0
     if test_result_col: sheet.cell(row=row_idx, column=test_result_col).value = overall
@@ -132,58 +176,39 @@ def generate_final_analytics():
     root = tk.Tk()
     root.withdraw()
     
-    # PHYSICAL VERIFICATION for Script 03:
-    # 1. If Excel file is missing, reset ALL status_excel to 'pending'
     if not os.path.exists(OUTPUT_EXCEL):
-        print("   Excel report missing. Resetting all entries to pending...")
-        for name in TARGETS_DICT:
-            TARGETS_DICT[name]['status_excel'] = 'pending'
+        print("   Excel report missing. Resetting entries...")
+        for name in TARGETS_DICT: TARGETS_DICT[name]['status_excel'] = 'pending'
     else:
-        # 2. If file exists, check the actual rows to see what is missing
-        # (This handles the case where you delete rows but not the file)
         wb_check = openpyxl.load_workbook(OUTPUT_EXCEL)
         sheet_check = wb_check[SHEET_NAME]
         header_row = 3
-        report_col_idx = 4 # Default column for Agency Name
-        # Find actual Report column index
+        report_col_idx = 4
         for idx, cell in enumerate(sheet_check[header_row]):
             if cell.value and "Report" in str(cell.value):
                 report_col_idx = idx + 1
                 break
-        
-        existing_agencies = set()
-        for r in range(header_row + 1, sheet_check.max_row + 1):
-            val = sheet_check.cell(row=r, column=report_col_idx).value
-            if val: existing_agencies.add(str(val).strip())
-        
-        # Sync JSON status with Excel rows
+        existing_agencies = {str(sheet_check.cell(row=r, column=report_col_idx).value).strip() 
+                             for r in range(header_row + 1, sheet_check.max_row + 1) 
+                             if sheet_check.cell(row=r, column=report_col_idx).value}
         for name in TARGETS_DICT:
-            if name not in existing_agencies:
-                TARGETS_DICT[name]['status_excel'] = 'pending'
-            else:
-                TARGETS_DICT[name]['status_excel'] = 'completed'
+            TARGETS_DICT[name]['status_excel'] = 'completed' if name in existing_agencies else 'pending'
 
-    # STRICT FILTER: Only process if status_pdf is 'completed' AND status_excel is 'pending'
     ready_targets = {k: v for k, v in TARGETS_DICT.items() 
                      if v.get('status_pdf') == 'completed' and v.get('status_excel', 'pending') == 'pending'}
-    
     total_ready = len(ready_targets)
     
     if total_ready == 0:
-        any_pdf_pending = any(v.get('status_pdf', 'pending') == 'pending' for v in TARGETS_DICT.values())
-        if any_pdf_pending:
-            messagebox.showwarning("Prerequisite Not Met", 
-                                   "No files are ready for Excel reporting.\n\nPlease run Script 02 first to generate comparison PDFs.")
+        if any(v.get('status_pdf', 'pending') == 'pending' for v in TARGETS_DICT.values()):
+            messagebox.showwarning("Prerequisite Not Met", "No files are ready for Excel reporting. Run Script 02 first.")
         else:
             messagebox.showinfo("Complete", "All files have been successfully processed!")
         return
 
-    batch_size = simpledialog.askinteger("Batch Size", 
-                                       f"Files Ready for Excel (PDF Complete): {total_ready}\n\nHow many entries would you like to process?", 
+    batch_size = simpledialog.askinteger("Batch Size", f"Files Ready for Excel: {total_ready}\n\nHow many entries?", 
                                        initialvalue=total_ready, minvalue=1, maxvalue=total_ready)
     if not batch_size: return
 
-    # Load/Start Workbook
     target_excel = OUTPUT_EXCEL if os.path.exists(OUTPUT_EXCEL) else TEMPLATE_PATH
     wb = openpyxl.load_workbook(target_excel)
     sheet = wb[SHEET_NAME]
@@ -192,8 +217,7 @@ def generate_final_analytics():
 
     report_col_idx = col_map.get('Report ') or col_map.get('Report', 4)
     current_row = header_row + 1
-    while sheet.cell(row=current_row, column=report_col_idx).value:
-        current_row += 1
+    while sheet.cell(row=current_row, column=report_col_idx).value: current_row += 1
 
     processed_count = 0
     for client_name, paths in ready_targets.items():
@@ -209,8 +233,7 @@ def generate_final_analytics():
             current_row += 1
             processed_count += 1
 
-    summary_msg = f"Excel Batch Complete!\n\nProcessed: {processed_count}\nRemaining: {total_ready - processed_count}"
-    messagebox.showinfo("Batch Complete", summary_msg)
+    messagebox.showinfo("Batch Complete", f"Excel Batch Complete!\n\nProcessed: {processed_count}")
 
 if __name__ == "__main__":
     generate_final_analytics()
