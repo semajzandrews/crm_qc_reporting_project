@@ -2,6 +2,8 @@ import openpyxl
 import os
 import re
 import json
+import tkinter as tk
+from tkinter import simpledialog, messagebox
 from pdfminer.high_level import extract_text
 from datetime import datetime
 
@@ -17,7 +19,6 @@ if not os.path.exists(TARGETS_FILE):
 with open(TARGETS_FILE, "r") as f:
     config_meta = json.load(f)
 
-# Paths extracted from the dynamic configuration
 HS_DIR = config_meta.get("hs_dir")
 SF_DIR = config_meta.get("sf_dir")
 TEMPLATE_PATH = config_meta.get("template_path")
@@ -31,11 +32,9 @@ LOG_FILE = os.path.join(RESULTS_DIR, "QA_TECHNICAL_EVIDENCE.md")
 SHEET_NAME = 'QA Report Test Tracker'
 TESTER_NAME = "Semaj Andrews"
 
-# Ensure Results Directory Exists
 if not os.path.exists(RESULTS_DIR):
     os.makedirs(RESULTS_DIR)
 
-# Identification Anchors
 SECTIONS = [
     {'key': 'Summary Page', 'marker': 'Year Over Year Comparison of Calls', 'next_marker': 'Calls by Agency'},
     {'key': 'Site Page', 'marker': 'Calls by Agency', 'next_marker': 'Calls by Day of Week'},
@@ -44,6 +43,11 @@ SECTIONS = [
     {'key': 'Outcome', 'marker': 'Calls by Outcome', 'next_marker': 'Calls by Diagnosis'},
     {'key': 'Diagnosis', 'marker': 'Calls by Diagnosis', 'next_marker': None}
 ]
+
+def clean_text(text):
+    """Normalize whitespace to avoid spacing-related mismatches."""
+    if not text: return ""
+    return re.sub(r'\s+', ' ', text).strip()
 
 def get_section_text(text, config):
     start_marker = config['marker']
@@ -109,9 +113,7 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         elif hs_block is None or sf_block is None:
             result, reason = 1, "Section presence mismatch"
         else:
-            clean_hs = re.sub(r'\s+', ' ', hs_block).strip()
-            clean_sf = re.sub(r'\s+', ' ', sf_block).strip()
-            result = 0 if clean_hs == clean_sf else 1
+            result = 0 if clean_text(hs_block) == clean_text(sf_block) else 1
             reason = "Data Match" if result == 0 else "Data Discrepancy Identified"
             
         if result == 1: any_failure = True
@@ -126,29 +128,61 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
     return True
 
 def generate_final_analytics():
-    """Generate Excel report and text log."""
-    print(f"Opening template: {os.path.basename(TEMPLATE_PATH)}")
-    wb = openpyxl.load_workbook(TEMPLATE_PATH)
+    """Generate Excel report and text log with batching."""
+    root = tk.Tk()
+    root.withdraw()
+    
+    pending_targets = {k: v for k, v in TARGETS_DICT.items() if v.get('status') == 'pending'}
+    total_pending = len(pending_targets)
+    
+    if total_pending == 0:
+        messagebox.showinfo("Complete", "No pending pairs left to process!")
+        return
+
+    batch_size = simpledialog.askinteger("Batch Size", 
+                                       f"Total Pending: {total_pending}\n\nHow many pairs would you like to process?\n(Recommended: 10)", 
+                                       initialvalue=10, minvalue=1, maxvalue=total_pending)
+    if not batch_size: return
+
+    # Load Template or existing result
+    target_excel = OUTPUT_EXCEL if os.path.exists(OUTPUT_EXCEL) else TEMPLATE_PATH
+    print(f"Opening: {os.path.basename(target_excel)}")
+    wb = openpyxl.load_workbook(target_excel)
     sheet = wb[SHEET_NAME]
     header_row = 3
     col_map = {str(cell.value).strip(): idx + 1 for idx, cell in enumerate(sheet[header_row]) if cell.value}
 
-    with open(LOG_FILE, "w") as f:
-        f.write(f"# Analysis Evidence Log - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n")
+    # Identify the next empty row for data persistence
+    report_col_idx = col_map.get('Report ') or col_map.get('Report', 4)
+    current_row = header_row + 1
+    while sheet.cell(row=current_row, column=report_col_idx).value:
+        current_row += 1
 
-    row = header_row + 1
-    for client_name, paths in TARGETS_DICT.items():
+    processed_count = 0
+    for client_name, paths in pending_targets.items():
+        if processed_count >= batch_size: break
+        
         client_lines = []
-        if process_client_analysis(sheet, row, col_map, client_name, paths['hs'], paths['sf'], client_lines):
+        if process_client_analysis(sheet, row_idx=current_row, col_map=col_map, client_name=client_name, 
+                                   hs_path=paths['hs'], sf_path=paths['sf'], client_lines=client_lines):
+            
+            # Update status in config to prevent re-processing
+            TARGETS_DICT[client_name]['status'] = 'completed'
+            config_meta['matches'] = TARGETS_DICT
+            with open(TARGETS_FILE, "w") as f:
+                json.dump(config_meta, f, indent=4)
+                
             wb.save(OUTPUT_EXCEL)
             with open(LOG_FILE, "a") as f:
                 f.write("\n".join(client_lines) + "\n")
-            print(f"   [Data Persisted] Record finalized for {client_name}")
-        row += 1
+            
+            print(f"   [FINALIZED] {client_name} (Row {current_row})")
+            current_row += 1
+            processed_count += 1
 
-    print(f"\nAnalytical sequence complete.")
-    print(f"Report: {OUTPUT_EXCEL}")
-    print(f"Evidence: {LOG_FILE}")
+    summary_msg = f"Batch Complete!\n\nProcessed: {processed_count}\nRemaining: {total_pending - processed_count}"
+    print(f"\n{summary_msg}")
+    messagebox.showinfo("Batch Complete", summary_msg)
 
 if __name__ == "__main__":
     generate_final_analytics()

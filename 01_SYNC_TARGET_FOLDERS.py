@@ -57,10 +57,11 @@ def synchronize_file_targets():
     sf_pass1 = set(sf_pool)
     exact_matches = hs_pass1.intersection(sf_pass1)
     
-    for filename in exact_matches:
+    for filename in list(exact_matches):
         matches[filename] = {
             "hs": os.path.join(RESULTS_MATCH_HS, filename),
-            "sf": os.path.join(RESULTS_MATCH_SF, filename)
+            "sf": os.path.join(RESULTS_MATCH_SF, filename),
+            "status": "pending"
         }
         shutil.move(os.path.join(hs_dir, filename), os.path.join(RESULTS_MATCH_HS, filename))
         shutil.move(os.path.join(sf_dir, filename), os.path.join(RESULTS_MATCH_SF, filename))
@@ -89,7 +90,8 @@ def synchronize_file_targets():
         if hs_count == 1 and sf_count == 1:
             matches[base] = {
                 "hs": os.path.join(RESULTS_MATCH_HS, hs_filename),
-                "sf": os.path.join(RESULTS_MATCH_SF, sf_filename)
+                "sf": os.path.join(RESULTS_MATCH_SF, sf_filename),
+                "status": "pending"
             }
             shutil.move(os.path.join(hs_dir, hs_filename), os.path.join(RESULTS_MATCH_HS, hs_filename))
             shutil.move(os.path.join(sf_dir, sf_filename), os.path.join(RESULTS_MATCH_SF, sf_filename))
