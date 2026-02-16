@@ -18,9 +18,9 @@ RESULTS_DIR = os.path.join(DOWNLOADS_DIR, "QA_ANALYTICS_RESULTS/")
 if not os.path.exists(RESULTS_DIR):
     os.makedirs(RESULTS_DIR)
 
-def generate_fallback_pdf(hs_path, sf_path, output_name):
-    """Generates a Side-by-Side PDF locally when comparison engine fails to export."""
-    print(f"   Generating local comparison report: {output_name}")
+def generate_side_by_side_pdf(hs_path, sf_path, output_name):
+    """Generates a Side-by-Side merged PDF locally."""
+    print(f"   Generating local report: {output_name}")
     try:
         reader_hs = PdfReader(hs_path)
         reader_sf = PdfReader(sf_path)
@@ -41,174 +41,116 @@ def generate_fallback_pdf(hs_path, sf_path, output_name):
                 op = Transformation().translate(tx=hs_width, ty=0)
                 new_page.merge_transformed_page(sf_page, op)
             writer.add_page(new_page)
-        full_output_path = os.path.join(DOWNLOADS_DIR, output_name)
+        full_output_path = os.path.join(RESULTS_DIR, output_name)
         with open(full_output_path, "wb") as f:
             writer.write(f)
-        print("   File generated successfully.")
+        print(f"   ✅ Local Report Generated: {output_name}")
+        return True
     except Exception as e:
-        print(f"   Generation failed: {e}")
+        print(f"   ❌ Generation failed: {e}")
+        return False
 
 def upload_sequence(coords, hs_path, sf_path):
     """Execute the file upload automation sequence with Cross-Platform support."""
     is_mac = platform.system() == "Darwin"
-    
     if "COMPARISON_AREA" in coords:
         pyautogui.click(coords["COMPARISON_AREA"])
         time.sleep(0.5)
-        
-    # --- PRIMARY FILE ---
     print("   Uploading primary file...")
     pyautogui.click(coords["LEFT_BROWSE"])
     time.sleep(2.0) 
-    
     if is_mac:
         pyautogui.hotkey('command', 'shift', 'g')
         time.sleep(1.0)
-    
     pyautogui.write(hs_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(1)
-    
-    # --- SECONDARY FILE ---
     print("   Uploading secondary file...")
     pyautogui.click(coords["RIGHT_BROWSE"])
     time.sleep(2.0)
-    
     if is_mac:
         pyautogui.hotkey('command', 'shift', 'g')
         time.sleep(1.0)
-        
     pyautogui.write(sf_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(1)
-    
     print("   Initializing comparison engine...")
     pyautogui.click(coords["FIND_DIFF_BTN"])
 
 def calibrate_mode():
     """Map screen coordinates for automation with live execution during setup."""
     print("\n--- LIVE CALIBRATION SETUP ---")
-    print("Selecting a non-identical pair to ensure the Export button is active...")
-    
     if not os.path.exists(TARGETS_FILE):
-        print("Error: targets.json not found. Run Script 01 first.")
+        print("Error: targets.json not found.")
         return
-        
     with open(TARGETS_FILE, "r") as f:
         meta = json.load(f)
         matches = meta.get("matches", {})
-        if not matches:
-            print("Error: No file pairs found.")
-            return
-
-        # Find two files that are DIFFERENT to enable the Export button
-        test_hs = ""
-        test_sf = ""
-        found_diff = False
-        
+        test_hs, test_sf, found_diff = "", "", False
         for name, paths in matches.items():
             try:
                 with open(paths['hs'], 'rb') as f1, open(paths['sf'], 'rb') as f2:
                     if f1.read() != f2.read():
-                        test_hs = paths['hs']
-                        test_sf = paths['sf']
-                        found_diff = True
-                        print(f"   Using non-identical pair: {name}")
+                        test_hs, test_sf, found_diff = paths['hs'], paths['sf'], True
                         break
-            except Exception:
-                continue
-        
+            except Exception: continue
         if not found_diff:
-            print("   ⚠️ No discrepancies found in matches. Using first available pair.")
             first_key = list(matches.keys())[0]
-            test_hs = matches[first_key]["hs"]
-            test_sf = matches[first_key]["sf"]
+            test_hs, test_sf = matches[first_key]["hs"], matches[first_key]["sf"]
 
     new_config = {}
     try:
-        input("👉 Hover over: [COMPARISON_AREA] and press ENTER...")
-        pos = pyautogui.position()
-        new_config["COMPARISON_AREA"] = [pos.x, pos.y]
-        pyautogui.click(pos.x, pos.y)
-        
-        input("👉 Hover over: [LEFT_BROWSE] and press ENTER...")
-        pos = pyautogui.position()
-        new_config["LEFT_BROWSE"] = [pos.x, pos.y]
-        
-        input("👉 Hover over: [RIGHT_BROWSE] and press ENTER...")
-        pos = pyautogui.position()
-        new_config["RIGHT_BROWSE"] = [pos.x, pos.y]
+        targets = [("COMPARISON_AREA", "Middle of page"), ("LEFT_BROWSE", "Left Browse"), 
+                   ("RIGHT_BROWSE", "Right Browse"), ("FIND_DIFF_BTN", "Find Difference")]
+        for key, desc in targets:
+            input(f"👉 Hover over: [{desc}] and press ENTER...")
+            pos = pyautogui.position()
+            new_config[key] = [pos.x, pos.y]
 
-        input("👉 Hover over: [FIND_DIFF_BTN] and press ENTER...")
-        pos = pyautogui.position()
-        new_config["FIND_DIFF_BTN"] = [pos.x, pos.y]
-
-        print("\n🚀 Performing Live Upload to transition to Export Screen...")
+        print("\n🚀 Transitioning to Export Screen...")
         upload_sequence(new_config, test_hs, test_sf)
-        
-        print("\n⏳ Waiting 5 seconds for results to load...")
         time.sleep(5)
 
-        input("👉 Hover over: [EXPORT_BTN] and press ENTER...")
-        pos = pyautogui.position()
-        new_config["EXPORT_BTN"] = [pos.x, pos.y]
-        pyautogui.click(pos.x, pos.y)
-        time.sleep(1.0)
+        targets_v2 = [("EXPORT_BTN", "Top Right Export"), ("SPLIT_VIEW_BTN", "Side-by-Side PDF"), 
+                      ("SAVE_BTN", "BLUE Export button"), ("TAB_CLOSE_BTN", "Tab Close 'X'"), 
+                      ("TAB_NEW_BTN", "Tab New '+'"), ("DOCUMENT_MODE_BTN", "Diffchecker Home")]
+        for key, desc in targets_v2:
+            input(f"👉 Hover over: [{desc}] and press ENTER...")
+            pos = pyautogui.position()
+            new_config[key] = [pos.x, pos.y]
+            if key in ["EXPORT_BTN", "SPLIT_VIEW_BTN"]: pyautogui.click(pos.x, pos.y); time.sleep(1)
 
-        input("👉 Hover over: [SPLIT_VIEW_BTN] and press ENTER...")
-        pos = pyautogui.position()
-        new_config["SPLIT_VIEW_BTN"] = [pos.x, pos.y]
-        pyautogui.click(pos.x, pos.y)
-        time.sleep(2.0)
-
-        input("👉 Hover over: [SAVE_BTN] and press ENTER...")
-        pos = pyautogui.position()
-        new_config["SAVE_BTN"] = [pos.x, pos.y]
-        
-        input("👉 Hover over: [TAB_CLOSE_BTN] and press ENTER...")
-        pos = pyautogui.position()
-        new_config["TAB_CLOSE_BTN"] = [pos.x, pos.y]
-
-        input("👉 Hover over: [TAB_NEW_BTN] and press ENTER...")
-        pos = pyautogui.position()
-        new_config["TAB_NEW_BTN"] = [pos.x, pos.y]
-
-        input("👉 Hover over: [DOCUMENT_MODE_BTN] and press ENTER...")
-        pos = pyautogui.position()
-        new_config["DOCUMENT_MODE_BTN"] = [pos.x, pos.y]
-
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(new_config, f, indent=4)
+        with open(CONFIG_FILE, "w") as f: json.dump(new_config, f, indent=4)
         print(f"\n✨ Setup Complete!")
-    except KeyboardInterrupt:
-        print("\nAborted.")
+    except KeyboardInterrupt: print("\nAborted.")
 
 def run_comparison_process(file_pairs):
     """Main execution loop for the comparison process."""
-    if not os.path.exists(CONFIG_FILE):
-        print(f"Error: Configuration file '{CONFIG_FILE}' not found.")
-        return
-    with open(CONFIG_FILE, "r") as f:
-        coords = json.load(f)
-
+    if not os.path.exists(CONFIG_FILE): return
+    with open(CONFIG_FILE, "r") as f: coords = json.load(f)
     is_mac = platform.system() == "Darwin"
     print("\n--- Step 2: Running Comparisons ---")
     time.sleep(3)
 
     for i, (name, files) in enumerate(file_pairs.items()):
         print(f"\n[{i+1}/{len(file_pairs)}] File: {name}")
+        timestamp = datetime.now().strftime("%m%d_%H%M")
         
-        # Binary check to skip Diffchecker if identical (saves time/bandwidth)
+        is_identical = False
         with open(files["hs"], 'rb') as f1, open(files["sf"], 'rb') as f2:
-            if f1.read() == f2.read():
-                print("   Status: Exact match identified. Skipping Diffchecker...")
-                continue
+            if f1.read() == f2.read(): is_identical = True
+
+        if is_identical:
+            print("   Status: Exact Match found. Generating Local Report...")
+            out_name = f"{name}_MATCH_{timestamp}.pdf"
+            generate_side_by_side_pdf(files["hs"], files["sf"], out_name)
+            continue
 
         upload_sequence(coords, files["hs"], files["sf"])
         time.sleep(6) 
@@ -216,26 +158,28 @@ def run_comparison_process(file_pairs):
         time.sleep(1.5)
         pyautogui.click(coords["SPLIT_VIEW_BTN"])
         time.sleep(2.5) 
-        timestamp = datetime.now().strftime("%m%d_%H%M")
-        base_name = f"{name}_Comparison_{timestamp}"
         
+        base_name = f"{name}_Comparison_{timestamp}"
+        if is_mac:
+            pyautogui.hotkey('command', 'shift', 'g')
+            time.sleep(1.0)
         pyautogui.write(base_name)
         time.sleep(1)
         pyautogui.press('enter')
         pyautogui.click(coords["SAVE_BTN"])
         time.sleep(4)
 
-        # Move to Results
         expected_file = os.path.join(DOWNLOADS_DIR, base_name + ".pdf")
         if os.path.exists(expected_file):
             os.rename(expected_file, os.path.join(RESULTS_DIR, base_name + ".pdf"))
+        else:
+            print("   ⚠️ Export failed. Generating Local Fallback...")
+            out_name = f"{name}_Comparison_{timestamp}.pdf"
+            generate_side_by_side_pdf(files["hs"], files["sf"], out_name)
 
-        pyautogui.click(coords["TAB_CLOSE_BTN"])
-        time.sleep(1)
-        pyautogui.click(coords["TAB_NEW_BTN"])
-        time.sleep(2)
-        pyautogui.click(coords["DOCUMENT_MODE_BTN"])
-        time.sleep(2)
+        pyautogui.click(coords["TAB_CLOSE_BTN"]); time.sleep(1)
+        pyautogui.click(coords["TAB_NEW_BTN"]); time.sleep(2)
+        pyautogui.click(coords["DOCUMENT_MODE_BTN"]); time.sleep(2)
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "calibrate":

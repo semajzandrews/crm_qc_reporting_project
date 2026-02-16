@@ -99,8 +99,8 @@ def synchronize_file_targets():
             sf_pool.remove(sf_filename)
 
     # --- Phase 3: Orphan Processing ---
-    ORPHAN_HS = os.path.join(hs_dir, "UNMATCHED_ORPHANS")
-    ORPHAN_SF = os.path.join(sf_dir, "UNMATCHED_ORPHANS")
+    ORPHAN_HS = os.path.join(hs_dir, "UNMATCHED_PAIRS")
+    ORPHAN_SF = os.path.join(sf_dir, "UNMATCHED_PAIRS")
     for d in [ORPHAN_HS, ORPHAN_SF]:
         if not os.path.exists(d): os.makedirs(d)
         
@@ -120,7 +120,7 @@ def synchronize_file_targets():
     with open(TARGETS_FILE, "w") as f:
         json.dump(meta, f, indent=4)
         
-    summary = f"COMPLETED:\nMatches Found: {len(matches)}\nRemaining Orphans: {len(hs_pool) + len(sf_pool)}"
+    summary = f"COMPLETED:\nMatches Found: {len(matches)}\nRemaining Unmatched: {len(hs_pool) + len(sf_pool)}"
     print(f"\n{summary}")
     messagebox.showinfo("Extraction Complete", summary)
 
