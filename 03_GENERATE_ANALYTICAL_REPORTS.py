@@ -139,20 +139,28 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         hs_raw = get_section_text(text_hs, section)
         sf_raw = get_section_text(text_sf, section)
         
+        # LOGIC: If a section is missing from one but present in the other
         if hs_raw is None and sf_raw is None:
-            result, reason = 0, "Section missing in both sources (Acceptable)"
+            # Special handling for Summary Page: Both missing is NOT a failure yet, 
+            # but we flag it so Cascading Failure can override it later.
+            result = 0
+            reason = "Section missing in both sources (Acceptable)"
         elif hs_raw is None or sf_raw is None:
-            result, reason = 1, "Section presence mismatch"
+            result = 1
+            reason = "Section presence mismatch"
         else:
             # STRIP REPEATED HEADERS BEFORE COMPARING
             clean_hs = clean_text(hs_raw, section['marker'])
             clean_sf = clean_text(sf_raw, section['marker'])
             
             # VOLUME GUARD: If data was found but it is just empty whitespace or single words
-            if len(clean_hs) < 5 and len(clean_sf) < 5:
-                result, reason = 0, "Empty table match"
-            elif len(clean_hs) < 5 or len(clean_sf) < 5:
-                result, reason = 1, "Data existence mismatch"
+            # Adjusted threshold to 10 chars to be safe but catch empty tables
+            if len(clean_hs) < 10 and len(clean_sf) < 10:
+                result = 0
+                reason = "Empty table match"
+            elif len(clean_hs) < 10 or len(clean_sf) < 10:
+                result = 1
+                reason = "Content volume mismatch (One side empty)"
             else:
                 result = 0 if clean_hs == clean_sf else 1
                 reason = "Data Match" if result == 0 else "Data Discrepancy Identified"
@@ -164,14 +172,20 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         if col_idx: sheet.cell(row=row_idx, column=col_idx).value = result
         
     # 3. Final Integrity Guard: Summary Page inherits sub-page failures
+    # This overrides the result even if it was "Section missing in both (0)" or "Data Match (0)"
     summary_key = 'Summary Page'
     summary_col = col_map.get(summary_key)
     if any_failure and summary_col:
         sheet.cell(row=row_idx, column=summary_col).value = 1
+        found_summary_line = False
         for i, line in enumerate(client_lines):
             if f"**{summary_key}**: 0" in line:
-                client_lines[i] = f"- **{summary_key}**: 1 (Inferred mismatch due to sub-page discrepancies)"
+                client_lines[i] = f"- **{summary_key}**: 1 (Inferred mismatch: Supplemental data errors detected)"
+                found_summary_line = True
                 break
+        if not found_summary_line:
+             # If summary was already 1, we don't need to change the log, but the logic holds.
+             pass
     
     test_result_col = col_map.get('Test Result')
     overall = 1 if any_failure else 0
