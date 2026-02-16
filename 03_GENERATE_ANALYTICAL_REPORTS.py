@@ -128,20 +128,29 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
     return True
 
 def generate_final_analytics():
-    """Generate Excel report and text log with batching."""
+    """Generate Excel report and text log with batching, only for PDF-complete pairs."""
     root = tk.Tk()
     root.withdraw()
     
-    pending_targets = {k: v for k, v in TARGETS_DICT.items() if v.get('status_excel', 'pending') == 'pending'}
-    total_pending = len(pending_targets)
+    # STRICT FILTER: Only process if status_pdf is 'completed' AND status_excel is 'pending'
+    ready_targets = {k: v for k, v in TARGETS_DICT.items() 
+                     if v.get('status_pdf') == 'completed' and v.get('status_excel', 'pending') == 'pending'}
     
-    if total_pending == 0:
-        messagebox.showinfo("Complete", "No pending Excel analytical entries left!")
+    total_ready = len(ready_targets)
+    
+    if total_ready == 0:
+        # Check if there are any PDFs still pending in general to give better feedback
+        any_pdf_pending = any(v.get('status_pdf', 'pending') == 'pending' for v in TARGETS_DICT.values())
+        if any_pdf_pending:
+            messagebox.showwarning("Prerequisite Not Met", 
+                                   "No files are ready for Excel reporting.\n\nPlease run Script 02 first to generate comparison PDFs.")
+        else:
+            messagebox.showinfo("Complete", "All files have been successfully processed!")
         return
 
     batch_size = simpledialog.askinteger("Batch Size", 
-                                       f"Total Pending Excel Entries: {total_pending}\n\nHow many entries would you like to process?\n(Recommended: 10)", 
-                                       initialvalue=10, minvalue=1, maxvalue=total_pending)
+                                       f"Files Ready for Excel (PDF Complete): {total_ready}\n\nHow many entries would you like to process?\n(Recommended: 10)", 
+                                       initialvalue=10, minvalue=1, maxvalue=total_ready)
     if not batch_size: return
 
     # Load Template or existing result
