@@ -45,38 +45,49 @@ SECTIONS = [
     {'key': 'Diagnosis', 'marker': 'Calls by Diagnosis', 'next_marker': None}
 ]
 
-def clean_text(text):
+def clean_text(text, marker_to_purge=None):
     """Normalize whitespace and remove redundant headers to handle multi-page wraps."""
     if not text: return ""
-    # Collapse whitespace
+    
+    # 1. Strip redundant headers that repeat on page wraps
+    if marker_to_purge:
+        text = re.sub(re.escape(marker_to_purge), '', text, flags=re.IGNORECASE)
+    
+    # 2. Collapse whitespace
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
 def get_section_text(text, config):
     """
     Slices PDF text based on greedy anchors to capture multi-page tables.
-    Matches from the FIRST start_marker to the FIRST next_marker found AFTER the start.
+    Uses 'Reach Next Expected Text' logic.
     """
     start_marker = config['marker']
     end_marker = config['next_marker']
     
     try:
-        # 1. Find the FIRST occurrence of the start marker (Case-Insensitive)
+        # Find the very first occurrence of the start marker
         start_match = re.search(re.escape(start_marker), text, re.IGNORECASE)
         if not start_match:
             return None
         
         start_idx = start_match.start()
         
-        # 2. Find the FIRST occurrence of the NEXT marker starting AFTER the start index
+        # Search for the next expected marker ONLY after the start index
         if end_marker:
             end_match = re.search(re.escape(end_marker), text[start_idx + len(start_marker):], re.IGNORECASE)
             if end_match:
-                # The index is relative to the slice, so we add the offset
                 end_idx = start_idx + len(start_marker) + end_match.start()
             else:
-                # If next marker not found, take everything to the end
+                # If next marker not found, we look for any subsequent marker in the list
+                # to prevent capturing the entire rest of the document
                 end_idx = len(text)
+                for sec in SECTIONS:
+                    if sec['marker'] == start_marker: continue
+                    alt_match = re.search(re.escape(sec['marker']), text[start_idx + len(start_marker):], re.IGNORECASE)
+                    if alt_match:
+                        found_idx = start_idx + len(start_marker) + alt_match.start()
+                        if found_idx < end_idx: end_idx = found_idx
         else:
             end_idx = len(text)
             
@@ -94,7 +105,7 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         client_lines.append(f"- {msg}")
         return False
 
-    # 1. Binary comparison check (Skip heavy parsing if identical)
+    # 1. Binary comparison check
     with open(hs_path, 'rb') as f1, open(sf_path, 'rb') as f2:
         if f1.read() == f2.read():
             print("   Status: Exact binary match identified.")
@@ -125,24 +136,23 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
     sheet.cell(row=row_idx, column=report_col).value = client_name
 
     for section in SECTIONS:
-        hs_block = get_section_text(text_hs, section)
-        sf_block = get_section_text(text_sf, section)
+        hs_raw = get_section_text(text_hs, section)
+        sf_raw = get_section_text(text_sf, section)
         
-        # LOGIC UPGRADE: If a section is missing from one but present in the other
-        if hs_block is None and sf_block is None:
+        if hs_raw is None and sf_raw is None:
             result, reason = 0, "Section missing in both sources (Acceptable)"
-        elif hs_block is None or sf_block is None:
+        elif hs_raw is None or sf_raw is None:
             result, reason = 1, "Section presence mismatch"
         else:
-            # NORMALIZATION: Collapse all whitespace to handle formatting shifts
-            clean_hs = clean_text(hs_block)
-            clean_sf = clean_text(sf_block)
+            # STRIP REPEATED HEADERS BEFORE COMPARING
+            clean_hs = clean_text(hs_raw, section['marker'])
+            clean_sf = clean_text(sf_raw, section['marker'])
             
-            # VALIDATION: Check if content is just the header or too short to be valid
-            if len(clean_hs) < 15 or len(clean_sf) < 15:
-                # If they both match headers but have no data, 0. If one has data and other doesn't, 1.
-                result = 0 if clean_hs == clean_sf else 1
-                reason = "Empty table match" if result == 0 else "Content volume mismatch"
+            # VOLUME GUARD: If data was found but it is just empty whitespace or single words
+            if len(clean_hs) < 5 and len(clean_sf) < 5:
+                result, reason = 0, "Empty table match"
+            elif len(clean_hs) < 5 or len(clean_sf) < 5:
+                result, reason = 1, "Data existence mismatch"
             else:
                 result = 0 if clean_hs == clean_sf else 1
                 reason = "Data Match" if result == 0 else "Data Discrepancy Identified"
@@ -157,9 +167,7 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
     summary_key = 'Summary Page'
     summary_col = col_map.get(summary_key)
     if any_failure and summary_col:
-        print(f"   Status: Discrepancy detected in sub-sections. Marking {summary_key} as 1.")
         sheet.cell(row=row_idx, column=summary_col).value = 1
-        # Update log line for summary if it was previously marked 0
         for i, line in enumerate(client_lines):
             if f"**{summary_key}**: 0" in line:
                 client_lines[i] = f"- **{summary_key}**: 1 (Inferred mismatch due to sub-page discrepancies)"
@@ -177,7 +185,6 @@ def generate_final_analytics():
     root.withdraw()
     
     if not os.path.exists(OUTPUT_EXCEL):
-        print("   Excel report missing. Resetting entries...")
         for name in TARGETS_DICT: TARGETS_DICT[name]['status_excel'] = 'pending'
     else:
         wb_check = openpyxl.load_workbook(OUTPUT_EXCEL)
@@ -200,12 +207,12 @@ def generate_final_analytics():
     
     if total_ready == 0:
         if any(v.get('status_pdf', 'pending') == 'pending' for v in TARGETS_DICT.values()):
-            messagebox.showwarning("Prerequisite Not Met", "No files are ready for Excel reporting. Run Script 02 first.")
+            messagebox.showwarning("Prerequisite Not Met", "No files ready. Run Script 02 first.")
         else:
-            messagebox.showinfo("Complete", "All files have been successfully processed!")
+            messagebox.showinfo("Complete", "All processed!")
         return
 
-    batch_size = simpledialog.askinteger("Batch Size", f"Files Ready for Excel: {total_ready}\n\nHow many entries?", 
+    batch_size = simpledialog.askinteger("Batch Size", f"Files Ready: {total_ready}\nHow many?", 
                                        initialvalue=total_ready, minvalue=1, maxvalue=total_ready)
     if not batch_size: return
 
@@ -233,7 +240,7 @@ def generate_final_analytics():
             current_row += 1
             processed_count += 1
 
-    messagebox.showinfo("Batch Complete", f"Excel Batch Complete!\n\nProcessed: {processed_count}")
+    messagebox.showinfo("Batch Complete", f"Processed: {processed_count}")
 
 if __name__ == "__main__":
     generate_final_analytics()
