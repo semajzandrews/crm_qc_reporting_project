@@ -31,7 +31,7 @@ def synchronize_file_targets():
     if not hs_dir: return
     print(f"HubSpot Folder Selected: {hs_dir}")
     
-    sf_dir = select_directory(f"STEP 2: Select Salesforce Source Folder (Matching to: {os.path.basename(hs_dir)})")
+    sf_dir = select_directory("STEP 2: Select Salesforce Source Folder (PDFs)")
     if not sf_dir: return
     print(f"Salesforce Folder Selected: {sf_dir}")
 
