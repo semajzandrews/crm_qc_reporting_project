@@ -168,7 +168,7 @@ def generate_final_analytics():
         current_row += 1
 
     processed_count = 0
-    for client_name, paths in pending_targets.items():
+    for client_name, paths in ready_targets.items():
         if processed_count >= batch_size: break
         
         client_lines = []
