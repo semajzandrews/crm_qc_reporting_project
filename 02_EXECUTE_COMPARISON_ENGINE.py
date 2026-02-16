@@ -104,8 +104,8 @@ def calibrate_mode():
         ("RIGHT_BROWSE", "Right 'Upload' or 'Browse' button"),
         ("FIND_DIFF_BTN", "The main 'Find Difference' button"),
         ("EXPORT_BTN", "The 'Export' button (usually top right after diff)"),
-        ("SPLIT_VIEW_BTN", "The 'PDF - Side by Side' option in the export menu"),
-        ("SAVE_BTN", "The BLUE 'Export' or 'Download' button in the final dialog (next to filename input)"),
+        ("SPLIT_VIEW_BTN", "The 'Split View' option in the export menu"),
+        ("SAVE_BTN", "The 'Save' or 'Download' button in the final dialog"),
         ("TAB_CLOSE_BTN", "The 'X' to close the current browser tab"),
         ("TAB_NEW_BTN", "The '+' to open a new browser tab"),
         ("DOCUMENT_MODE_BTN", "The bookmark or button to return to Diffchecker home")
@@ -142,47 +142,33 @@ def run_comparison_process(file_pairs):
     print("Switch to browser in 3 seconds...")
     time.sleep(3)
 
-    is_mac = platform.system() == "Darwin"
-
     for i, (name, files) in enumerate(file_pairs.items()):
-        # Skip if already completed by Script 03
-        if files.get('status') == 'completed':
-            continue
-
-        print(f"\nProcessing File: {name}")
+        print(f"\n[{i+1}/{len(file_pairs)}] File: {name}")
         hs_path = files["hs"]
         sf_path = files["sf"]
 
         # 1. UI Automation Sequence
         upload_sequence(coords, hs_path, sf_path)
         
-        # Long wait for Diffchecker to process the PDFs
-        print("   Waiting for difference engine (10s)...")
-        time.sleep(10) 
+        # INCREASED WAIT TO ENSURE PROCESSING IS DONE
+        print("   Processing (12s)...")
+        time.sleep(12) 
         
-        print("   Opening Export menu...")
+        print("   Checking differences...")
         pyautogui.click(coords["EXPORT_BTN"])
-        time.sleep(2)
-        
-        print("   Selecting Side-by-Side PDF...")
+        time.sleep(1.5)
         pyautogui.click(coords["SPLIT_VIEW_BTN"])
-        time.sleep(3) # Wait for the filename/save dialog
+        time.sleep(2.5) 
         
         timestamp = datetime.now().strftime("%m%d_%H%M")
         base_name = f"{name}_Comparison_{timestamp}"
         
-        print(f"   Entering filename: {base_name}")
-        # On Mac, often need to ensure focus on the input or use hotkey
-        if is_mac:
-            pyautogui.hotkey('command', 'a')
-            pyautogui.press('backspace')
-            
+        print(f"   Saving as: {base_name}")
         pyautogui.write(base_name)
         time.sleep(1)
-        
-        print("   Finalizing export...")
+        pyautogui.press('enter') # Standard save behavior
         pyautogui.click(coords["SAVE_BTN"])
-        time.sleep(5) # Wait for download to finish
+        time.sleep(4)
 
         # Verify Analysis Export and Move to Results
         expected_file = os.path.join(DOWNLOADS_DIR, base_name + ".pdf")
@@ -192,7 +178,6 @@ def run_comparison_process(file_pairs):
             os.rename(expected_file, final_destination)
             print(f"   ✅ Export Verified: {final_destination}")
         else:
-            print(f"   ⚠️ Export check failed for {expected_file}. Using local fallback.")
             fallback_name = f"{base_name}_MATCH_REPORT.pdf"
             generate_fallback_pdf(hs_path, sf_path, fallback_name)
             output_fallback_path = os.path.join(DOWNLOADS_DIR, fallback_name)
@@ -211,25 +196,18 @@ def run_comparison_process(file_pairs):
     print("Execution complete. Finalizing outputs.")
 
 if __name__ == "__main__":
-    # Load targets from centralized configuration
-    if not os.path.exists(TARGETS_FILE):
-        print("Error: targets.json not found. Run Script 01 first.")
-        sys.exit(1)
-
-    with open(TARGETS_FILE, "r") as f:
-        meta = json.load(f)
-        targets = meta.get("matches", {})
-
     if len(sys.argv) > 1 and sys.argv[1] == "calibrate":
         calibrate_mode()
     else:
-        # Process only pending targets if possible, or all if no status exists
-        pending = {k: v for k, v in targets.items() if v.get('status') == 'pending'}
-        
-        if not pending:
-            print("No pending comparisons found. (Check if you ran Script 01 or if all are 'completed')")
-            # If nothing is 'pending', just process whatever is in matches
-            pending = targets
+        # Load targets from centralized configuration
+        if not os.path.exists(TARGETS_FILE):
+            print("Error: targets.json not found. Run Script 01 first.")
+            sys.exit(1)
 
-        print(f"--- Processing {len(pending)} targets ---")
-        run_comparison_process(pending)
+        with open(TARGETS_FILE, "r") as f:
+            meta = json.load(f)
+            targets = meta.get("matches", {})
+        
+        # Process all targets found in the configuration
+        print(f"--- Processing {len(targets)} targets ---")
+        run_comparison_process(targets)
