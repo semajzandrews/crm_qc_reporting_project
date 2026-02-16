@@ -131,6 +131,7 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         return False
 
     any_failure = False
+    summary_present_in_both = False # Track if Summary Page exists to apply cascading logic later
     sheet.cell(row=row_idx, column=col_map.get('Tester', 3)).value = TESTER_NAME
     report_col = col_map.get('Report ') or col_map.get('Report', 4)
     sheet.cell(row=row_idx, column=report_col).value = client_name
@@ -141,14 +142,17 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         
         # LOGIC: If a section is missing from one but present in the other
         if hs_raw is None and sf_raw is None:
-            # Special handling for Summary Page: Both missing is NOT a failure yet, 
-            # but we flag it so Cascading Failure can override it later.
+            # Special handling for Summary Page: Both missing is Acceptable (Permanent 0).
             result = 0
             reason = "Section missing in both sources (Acceptable)"
+            if section['key'] == 'Summary Page': summary_present_in_both = False
         elif hs_raw is None or sf_raw is None:
             result = 1
             reason = "Section presence mismatch"
+            if section['key'] == 'Summary Page': summary_present_in_both = False # Already failed
         else:
+            if section['key'] == 'Summary Page': summary_present_in_both = True
+            
             # STRIP REPEATED HEADERS BEFORE COMPARING
             clean_hs = clean_text(hs_raw, section['marker'])
             clean_sf = clean_text(sf_raw, section['marker'])
@@ -172,10 +176,11 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         if col_idx: sheet.cell(row=row_idx, column=col_idx).value = result
         
     # 3. Final Integrity Guard: Summary Page inherits sub-page failures
-    # This overrides the result even if it was "Section missing in both (0)" or "Data Match (0)"
+    # This overrides the result ONLY if the Summary Page was actually present in both.
+    # If it was missing in both (Acceptable), it stays 0 regardless of other failures.
     summary_key = 'Summary Page'
     summary_col = col_map.get(summary_key)
-    if any_failure and summary_col:
+    if any_failure and summary_col and summary_present_in_both:
         sheet.cell(row=row_idx, column=summary_col).value = 1
         found_summary_line = False
         for i, line in enumerate(client_lines):
