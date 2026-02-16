@@ -133,11 +133,21 @@ def calibrate_mode():
     except KeyboardInterrupt: print("\nAborted.")
 
 def run_comparison_process(config_meta):
-    """Main execution loop with batching support."""
+    """Main execution loop with physical file verification."""
     if not os.path.exists(CONFIG_FILE): return
     with open(CONFIG_FILE, "r") as f: coords = json.load(f)
     
     targets_dict = config_meta.get("matches", {})
+    
+    # PHYSICAL VERIFICATION: If PDF is missing from RESULTS_DIR, set status_pdf back to 'pending'
+    for name, files in targets_dict.items():
+        if files.get('status_pdf') == 'completed':
+            # We don't know the exact timestamp used previously, so we check for any PDF starting with the name
+            pdf_found = any(f.startswith(name) and f.endswith(".pdf") for f in os.listdir(RESULTS_DIR))
+            if not pdf_found:
+                print(f"   Re-enabling PDF for {name} (File missing from Results)")
+                targets_dict[name]['status_pdf'] = 'pending'
+
     pending_targets = {k: v for k, v in targets_dict.items() if v.get('status_pdf', 'pending') == 'pending'}
     total_pending = len(pending_targets)
     

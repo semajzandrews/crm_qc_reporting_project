@@ -128,10 +128,41 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
     return True
 
 def generate_final_analytics():
-    """Generate Excel report and text log with batching, only for PDF-complete pairs."""
+    """Generate Excel report and text log with batching and physical verification."""
     root = tk.Tk()
     root.withdraw()
     
+    # PHYSICAL VERIFICATION for Script 03:
+    # 1. If Excel file is missing, reset ALL status_excel to 'pending'
+    if not os.path.exists(OUTPUT_EXCEL):
+        print("   Excel report missing. Resetting all entries to pending...")
+        for name in TARGETS_DICT:
+            TARGETS_DICT[name]['status_excel'] = 'pending'
+    else:
+        # 2. If file exists, check the actual rows to see what is missing
+        # (This handles the case where you delete rows but not the file)
+        wb_check = openpyxl.load_workbook(OUTPUT_EXCEL)
+        sheet_check = wb_check[SHEET_NAME]
+        header_row = 3
+        report_col_idx = 4 # Default column for Agency Name
+        # Find actual Report column index
+        for idx, cell in enumerate(sheet_check[header_row]):
+            if cell.value and "Report" in str(cell.value):
+                report_col_idx = idx + 1
+                break
+        
+        existing_agencies = set()
+        for r in range(header_row + 1, sheet_check.max_row + 1):
+            val = sheet_check.cell(row=r, column=report_col_idx).value
+            if val: existing_agencies.add(str(val).strip())
+        
+        # Sync JSON status with Excel rows
+        for name in TARGETS_DICT:
+            if name not in existing_agencies:
+                TARGETS_DICT[name]['status_excel'] = 'pending'
+            else:
+                TARGETS_DICT[name]['status_excel'] = 'completed'
+
     # STRICT FILTER: Only process if status_pdf is 'completed' AND status_excel is 'pending'
     ready_targets = {k: v for k, v in TARGETS_DICT.items() 
                      if v.get('status_pdf') == 'completed' and v.get('status_excel', 'pending') == 'pending'}
@@ -139,7 +170,6 @@ def generate_final_analytics():
     total_ready = len(ready_targets)
     
     if total_ready == 0:
-        # Check if there are any PDFs still pending in general to give better feedback
         any_pdf_pending = any(v.get('status_pdf', 'pending') == 'pending' for v in TARGETS_DICT.values())
         if any_pdf_pending:
             messagebox.showwarning("Prerequisite Not Met", 
@@ -149,19 +179,17 @@ def generate_final_analytics():
         return
 
     batch_size = simpledialog.askinteger("Batch Size", 
-                                       f"Files Ready for Excel (PDF Complete): {total_ready}\n\nHow many entries would you like to process?\n(Recommended: 10)", 
-                                       initialvalue=10, minvalue=1, maxvalue=total_ready)
+                                       f"Files Ready for Excel (PDF Complete): {total_ready}\n\nHow many entries would you like to process?", 
+                                       initialvalue=total_ready, minvalue=1, maxvalue=total_ready)
     if not batch_size: return
 
-    # Load Template or existing result
+    # Load/Start Workbook
     target_excel = OUTPUT_EXCEL if os.path.exists(OUTPUT_EXCEL) else TEMPLATE_PATH
-    print(f"Opening: {os.path.basename(target_excel)}")
     wb = openpyxl.load_workbook(target_excel)
     sheet = wb[SHEET_NAME]
     header_row = 3
     col_map = {str(cell.value).strip(): idx + 1 for idx, cell in enumerate(sheet[header_row]) if cell.value}
 
-    # Identify the next empty row for data persistence
     report_col_idx = col_map.get('Report ') or col_map.get('Report', 4)
     current_row = header_row + 1
     while sheet.cell(row=current_row, column=report_col_idx).value:
@@ -170,27 +198,18 @@ def generate_final_analytics():
     processed_count = 0
     for client_name, paths in ready_targets.items():
         if processed_count >= batch_size: break
-        
         client_lines = []
-        if process_client_analysis(sheet, row_idx=current_row, col_map=col_map, client_name=client_name, 
-                                   hs_path=paths['hs'], sf_path=paths['sf'], client_lines=client_lines):
-            
-            # Update status in config to prevent re-processing
+        if process_client_analysis(sheet, current_row, col_map, client_name, paths['hs'], paths['sf'], client_lines):
             TARGETS_DICT[client_name]['status_excel'] = 'completed'
             config_meta['matches'] = TARGETS_DICT
-            with open(TARGETS_FILE, "w") as f:
-                json.dump(config_meta, f, indent=4)
-                
+            with open(TARGETS_FILE, "w") as f: json.dump(config_meta, f, indent=4)
             wb.save(OUTPUT_EXCEL)
-            with open(LOG_FILE, "a") as f:
-                f.write("\n".join(client_lines) + "\n")
-            
+            with open(LOG_FILE, "a") as f: f.write("\n".join(client_lines) + "\n")
             print(f"   [FINALIZED] {client_name} (Row {current_row})")
             current_row += 1
             processed_count += 1
 
     summary_msg = f"Excel Batch Complete!\n\nProcessed: {processed_count}\nRemaining: {total_ready - processed_count}"
-    print(f"\n{summary_msg}")
     messagebox.showinfo("Batch Complete", summary_msg)
 
 if __name__ == "__main__":
