@@ -5,16 +5,28 @@ import json
 from pdfminer.high_level import extract_text
 from datetime import datetime
 
-# Relative path configuration for portability
+# Relative path configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DOWNLOADS_DIR = os.path.expanduser("~/Downloads/")
-HS_DIR = os.path.join(DOWNLOADS_DIR, "HubSpot 2/")
-SF_DIR = os.path.join(DOWNLOADS_DIR, "Salesforce 2/")
-RESULTS_DIR = os.path.join(DOWNLOADS_DIR, "QA_ANALYTICS_RESULTS/")
-TEMPLATE_PATH = os.path.join(DOWNLOADS_DIR, 'Qlik Month End Reporting - Quality Assaunce Testing - Semaj.xlsx')
+TARGETS_FILE = os.path.join(BASE_DIR, "targets.json")
+
+# Load Configuration from Script 01
+if not os.path.exists(TARGETS_FILE):
+    print(f"Error: {os.path.basename(TARGETS_FILE)} not found. Please run Script 01 first.")
+    exit(1)
+
+with open(TARGETS_FILE, "r") as f:
+    config_meta = json.load(f)
+
+# Paths extracted from the dynamic configuration
+HS_DIR = config_meta.get("hs_dir")
+SF_DIR = config_meta.get("sf_dir")
+TEMPLATE_PATH = config_meta.get("template_path")
+TARGETS_DICT = config_meta.get("matches", {})
+
+# Results are always localized to the Template directory
+RESULTS_DIR = os.path.join(os.path.dirname(TEMPLATE_PATH), "QA_ANALYTICS_RESULTS")
 OUTPUT_EXCEL = os.path.join(RESULTS_DIR, 'QA_ANALYTICS_REPORT_FINAL.xlsx')
 LOG_FILE = os.path.join(RESULTS_DIR, "QA_TECHNICAL_EVIDENCE.md")
-TARGETS_FILE = os.path.join(BASE_DIR, "targets.json")
 
 SHEET_NAME = 'QA Report Test Tracker'
 TESTER_NAME = "Semaj Andrews"
@@ -34,33 +46,23 @@ SECTIONS = [
 ]
 
 def get_section_text(text, config):
-    """Slices PDF text based on markers using case-insensitive matching."""
     start_marker = config['marker']
     end_marker = config['next_marker']
-    
     try:
         start_match = re.search(re.escape(start_marker), text, re.IGNORECASE)
-        if not start_match:
-            return None
-        
+        if not start_match: return None
         start_idx = start_match.start()
         end_idx = len(text)
-        
         if end_marker:
             end_match = re.search(re.escape(end_marker), text[start_idx + len(start_marker):], re.IGNORECASE)
             if end_match:
                 end_idx = start_idx + len(start_marker) + end_match.start()
-                
         return text[start_idx:end_idx].strip()
-    except Exception:
-        return None
+    except Exception: return None
 
-def process_client_analysis(sheet, row_idx, col_map, client_name, hs_file, sf_file, client_lines):
-    """Parses PDF content and evaluates discrepancies across specific report sections."""
+def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_path, client_lines):
     print(f"--- PROCESSING: {client_name} ---")
     client_lines.append(f"\n### Client: {client_name}")
-    hs_path = os.path.join(HS_DIR, hs_file)
-    sf_path = os.path.join(SF_DIR, sf_file)
     
     if not os.path.exists(hs_path) or not os.path.exists(sf_path):
         msg = "Error: File paths could not be verified."
@@ -103,11 +105,9 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_file, sf_fi
         sf_block = get_section_text(text_sf, section)
         
         if hs_block is None and sf_block is None:
-            result = 0
-            reason = "Section missing in both sources (Acceptable)"
+            result, reason = 0, "Section missing in both sources (Acceptable)"
         elif hs_block is None or sf_block is None:
-            result = 1
-            reason = "Section presence mismatch"
+            result, reason = 1, "Section presence mismatch"
         else:
             clean_hs = re.sub(r'\s+', ' ', hs_block).strip()
             clean_sf = re.sub(r'\s+', ' ', sf_block).strip()
@@ -116,28 +116,9 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_file, sf_fi
             
         if result == 1: any_failure = True
         client_lines.append(f"- **{section['key']}**: {result} ({reason})")
-        
         col_idx = col_map.get(section['key'])
         if col_idx: sheet.cell(row=row_idx, column=col_idx).value = result
         
-    # 3. Final conditional check for generated images
-    if any_failure:
-        summary_col = col_map.get('Summary Page')
-        if summary_col:
-            is_present_match = False
-            for line in client_lines:
-                if line.startswith("- **Summary Page**: 0 (Data Match)"):
-                    is_present_match = True
-                    break
-            
-            if is_present_match:
-                print(f"   Status: Cascading failure identified for Summary Page.")
-                sheet.cell(row=row_idx, column=summary_col).value = 1
-                for i, line in enumerate(client_lines):
-                    if line.startswith("- **Summary Page**: 0 (Data Match)"):
-                        client_lines[i] = "- **Summary Page**: 1 (Inferred mismatch: Supplemental data discrepancies found)"
-                        break
-    
     test_result_col = col_map.get('Test Result')
     overall = 1 if any_failure else 0
     if test_result_col: sheet.cell(row=row_idx, column=test_result_col).value = overall
@@ -145,28 +126,8 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_file, sf_fi
     return True
 
 def generate_final_analytics():
-    """Main process for generating comprehensive analytical reports with persistence."""
-    for report_path in [OUTPUT_EXCEL, LOG_FILE]:
-        if os.path.exists(report_path):
-            try:
-                os.remove(report_path)
-                print(f"Initializing clean environment: Removed {os.path.basename(report_path)}")
-            except Exception:
-                pass
-
-    if not os.path.exists(TARGETS_FILE):
-        print(f"Error: Required file {os.path.basename(TARGETS_FILE)} not found.")
-        return
-        
-    # Process all targets found in configuration
-    with open(TARGETS_FILE, "r") as f:
-        targets_dict = json.load(f)
-    
-    targets = []
-    for name, files in targets_dict.items():
-        targets.append((name, os.path.basename(files['hs']), os.path.basename(files['sf'])))
-
-    print(f"Loading data template: {os.path.basename(TEMPLATE_PATH)}")
+    """Generate Excel report and text log."""
+    print(f"Opening template: {os.path.basename(TEMPLATE_PATH)}")
     wb = openpyxl.load_workbook(TEMPLATE_PATH)
     sheet = wb[SHEET_NAME]
     header_row = 3
@@ -176,13 +137,13 @@ def generate_final_analytics():
         f.write(f"# Analysis Evidence Log - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n")
 
     row = header_row + 1
-    for name, hs_file, sf_file in targets:
+    for client_name, paths in TARGETS_DICT.items():
         client_lines = []
-        if process_client_analysis(sheet, row, col_map, name, hs_file, sf_file, client_lines):
+        if process_client_analysis(sheet, row, col_map, client_name, paths['hs'], paths['sf'], client_lines):
             wb.save(OUTPUT_EXCEL)
             with open(LOG_FILE, "a") as f:
                 f.write("\n".join(client_lines) + "\n")
-            print(f"   [Data Persisted] Record finalized for {name}")
+            print(f"   [Data Persisted] Record finalized for {client_name}")
         row += 1
 
     print(f"\nAnalytical sequence complete.")

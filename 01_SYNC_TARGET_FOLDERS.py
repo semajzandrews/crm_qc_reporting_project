@@ -16,14 +16,28 @@ def select_directory(title):
     root.destroy()
     return path
 
+def select_file(title, filetypes):
+    root = tk.Tk()
+    root.withdraw()
+    path = filedialog.askopenfilename(title=title, filetypes=filetypes)
+    root.destroy()
+    return path
+
 def synchronize_file_targets():
-    """Multi-Pass matching strategy to maximize data integrity."""
+    """Logic to match and organize files for comparison."""
     print("Initializing Multi-Pass Synchronization Engine...")
     
-    hs_dir = select_directory("Select HubSpot Source Folder")
+    hs_dir = select_directory("STEP 1: Select HubSpot Source Folder")
     if not hs_dir: return
-    sf_dir = select_directory("Select Salesforce Source Folder")
+    print(f"HubSpot Folder Selected: {hs_dir}")
+    
+    sf_dir = select_directory(f"STEP 2: Select Salesforce Source Folder (Matching to HubSpot: {os.path.basename(hs_dir)})")
     if not sf_dir: return
+    print(f"Salesforce Folder Selected: {sf_dir}")
+
+    template_path = select_file("STEP 3: Select Excel Data Template (.xlsx)", [("Excel files", "*.xlsx"), ("All files", "*.*")])
+    if not template_path: return
+    print(f"Template Selected: {template_path}")
 
     # Results Destination
     RESULTS_MATCH_HS = os.path.join(hs_dir, "MATCHED_PAIRS")
@@ -37,7 +51,7 @@ def synchronize_file_targets():
     
     matches = {}
 
-    # --- Phase 1: Exact Filename Match ---
+    # --- Phase 1: Filename Match ---
     print("Phase 1: Checking for exact filename matches...")
     hs_pass1 = set(hs_pool)
     sf_pass1 = set(sf_pool)
@@ -53,8 +67,7 @@ def synchronize_file_targets():
         hs_pool.remove(filename)
         sf_pool.remove(filename)
 
-    # --- Phase 2: Timestamp Truncation Match ---
-    # Example: 'Client_2026-02-10_14-30.pdf' vs 'Client_2026-02-11_15-00.pdf'
+    # --- Phase 2: Name Match ---
     print("Phase 2: Matching by truncating timestamps...")
     
     def get_base(f):
@@ -89,11 +102,21 @@ def synchronize_file_targets():
     for d in [ORPHAN_HS, ORPHAN_SF]:
         if not os.path.exists(d): os.makedirs(d)
         
-    for f in hs_pool: shutil.move(os.path.join(hs_dir, f), os.path.join(ORPHAN_HS, f))
-    for f in sf_pool: shutil.move(os.path.join(sf_dir, f), os.path.join(ORPHAN_SF, f))
+    for f in list(hs_pool):
+        shutil.move(os.path.join(hs_dir, f), os.path.join(ORPHAN_HS, f))
+    for f in list(sf_pool):
+        shutil.move(os.path.join(sf_dir, f), os.path.join(ORPHAN_SF, f))
+
+    # Store metadata for 03 script
+    meta = {
+        "hs_dir": hs_dir,
+        "sf_dir": sf_dir,
+        "template_path": template_path,
+        "matches": matches
+    }
 
     with open(TARGETS_FILE, "w") as f:
-        json.dump(matches, f, indent=4)
+        json.dump(meta, f, indent=4)
         
     summary = f"COMPLETED:\nMatches Found: {len(matches)}\nRemaining Orphans: {len(hs_pool) + len(sf_pool)}"
     print(f"\n{summary}")

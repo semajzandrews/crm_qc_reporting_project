@@ -1,74 +1,78 @@
 # CRM Quality Assurance Automation Suite
 
-This repository contains a professional-grade automation suite for validating and comparing HubSpot vs. Salesforce report data. The system utilizes a 3-step pipeline to ensure 100% data integrity and machine-verified accuracy.
+A high-precision automation pipeline designed for the cross-platform validation and comparison of HubSpot and Salesforce report data. This suite implements a verified 3-step synchronization and analysis protocol.
 
-## System Prerequisites
+## Environment Configuration
 
-Before running the suite, ensure your environment is configured correctly.
+This project requires Python 3.10+ and should be executed within a virtual environment to ensure dependency stability.
 
-1.  **Python 3.10+**: Ensure Python is installed and added to your PATH.
-2.  **Dependencies**: Install the required libraries using the provided manifest.
+1.  **Initialize Virtual Environment:**
     ```bash
-    pip install -r requirements.txt
+    python3 -m venv venv
     ```
-3.  **Source Files**: Place your raw PDF reports in your `Downloads` folder (or equivalent).
-    *   **HubSpot Reports**: Ensure they are in a folder (e.g., `HubSpot 2`).
-    *   **Salesforce Reports**: Ensure they are in a folder (e.g., `Salesforce 2`).
+2.  **Activate Environment:**
+    ```bash
+    source venv/bin/activate
+    ```
+3.  **Install Dependencies:**
+    ```bash
+    pip3 install -r requirements.txt
+    ```
 
 ---
 
-## Execution Protocol (Step-by-Step)
+## Execution Protocol
 
-Run the following scripts in exact numerical order. Do not skip steps.
+Scripts must be executed in numerical order. Ensure the virtual environment is active (`source venv/bin/activate`) before starting.
 
 ### **Step 01: Synchronization & Triage**
 **Command:**
 ```bash
 python3 01_SYNC_TARGET_FOLDERS.py
 ```
-**What it does:**
-*   Opens a window for you to select your **HubSpot** and **Salesforce** source folders.
-*   Scans for 1:1 matching report pairs based on the client name.
-*   **Auto-Triage:** Automatically moves duplicate or mismatched files into `TRIAGE_COLLISIONS` and `TRIAGE_ORPHANS` folders to ensure only perfect pairs are processed.
-*   **Output:** Generates `targets.json` (The Master Map).
-
----
+**Functionality:**
+*   Initializes the source selection interface for HubSpot and Salesforce report directories.
+*   **Automated Triage:** Filters duplicates and mismatches into `TRIAGE_COLLISIONS` and `TRIAGE_ORPHANS` directories.
+*   **Output:** Generates `targets.json` (The Master Mapping File).
 
 ### **Step 02: Visual Comparison Engine**
 **Command:**
 ```bash
 python3 02_EXECUTE_COMPARISON_ENGINE.py
 ```
-**First Run (Calibration):**
-If running on a new machine, you must map your screen coordinates first:
+
+#### **📍 Calibration Protocol**
+If executing on a new workstation or monitor configuration, initial coordinate mapping is required:
 ```bash
 python3 02_EXECUTE_COMPARISON_ENGINE.py calibrate
 ```
-*Follow the on-screen wizard to hover over buttons and press Enter.*
+**Instructions:**
+1.  Open the web browser to the target comparison engine (Diffchecker).
+2.  The CLI will request a hover-state for specific UI elements.
+3.  Position the cursor over the target element; **do not click**.
+4.  Press **Enter** to store the coordinate.
+5.  Configuration is persistent in `diff_config.json`.
 
-**What it does:**
-*   Reads the `targets.json` map.
-*   Automates your web browser to upload each pair to the Diffchecker engine.
-*   Exports a visual **Split-View PDF** highlighting any differences.
-*   **Automation Note:** Do not use your mouse/keyboard while this script is running.
-*   **Output:** Saves comparison PDFs to `~/Downloads/QA_ANALYTICS_RESULTS/`.
-
----
+**Operational Note:** This script utilizes automated GUI interactions (PyAutoGUI). Do not use the mouse or keyboard while execution is in progress.
 
 ### **Step 03: Analytical Reporting & Evidence**
 **Command:**
 ```bash
 python3 03_GENERATE_ANALYTICAL_REPORTS.py
 ```
-**What it does:**
-*   Performs a "Machine Precision" scan of the text data in every report.
-*   Applies **Cascade Logic**: If data discrepancies are found, it invalidates the Summary Page.
-*   **Output:** Generates two final artifacts in `~/Downloads/QA_ANALYTICS_RESULTS/`:
-    1.  **`QA_ANALYTICS_REPORT_FINAL.xlsx`**: The Master Excel Grid (0 = Match, 1 = Mismatch).
-    2.  **`QA_TECHNICAL_EVIDENCE.md`**: A row-by-row technical log explaining *why* every grade was assigned.
+**Functionality:**
+*   Performs machine-level OCR and text extraction on all comparison artifacts.
+*   Applies validation logic to verify data integrity between reports.
+*   **Output:** Generates `QA_ANALYTICS_REPORT_FINAL.xlsx` and `QA_TECHNICAL_EVIDENCE.md`.
 
 ---
 
-## Output Location
-All final deliverables are automatically saved to:
-📂 **`~/Downloads/QA_ANALYTICS_RESULTS/`**
+## Output Directory
+All deliverables are exported to:
+**`~/Downloads/QA_ANALYTICS_RESULTS/`**
+
+## Technical Note
+Before beginning any session, verify that the `(venv)` indicator is present in your shell prompt. If not present, run:
+```bash
+source venv/bin/activate
+```

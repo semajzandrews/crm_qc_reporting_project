@@ -92,11 +92,11 @@ def upload_sequence(coords, hs_path, sf_path):
     pyautogui.click(coords["FIND_DIFF_BTN"])
 
 def calibrate_mode():
-    """Interactive wizard to map screen coordinates for the user."""
-    print("\n--- CALIBRATION WIZARD ---")
-    print("You will hover your mouse over specific buttons and press [ENTER] to capture coordinates.")
-    print("Ensure your browser is open to Diffchecker and maximized.")
-    print("Press [Ctrl+C] to abort at any time.\n")
+    """Map screen coordinates for automation."""
+    print("\n--- SETUP ---")
+    print("Hover over the specific buttons and press [ENTER] to save coordinates.")
+    print("Ensure the browser is open and visible.")
+    print("Press [Ctrl+C] to cancel.\n")
     
     targets = [
         ("COMPARISON_AREA", "Click anywhere in the middle of the page to ensure focus"),
@@ -124,7 +124,7 @@ def calibrate_mode():
         with open(CONFIG_FILE, "w") as f:
             json.dump(new_config, f, indent=4)
             
-        print(f"\n✨ Calibration Complete! Config saved to: {CONFIG_FILE}")
+        print(f"\n✨ Setup Complete! Settings saved to: {CONFIG_FILE}")
         
     except KeyboardInterrupt:
         print("\n\n❌ Calibration Aborted.")
@@ -138,19 +138,19 @@ def run_comparison_process(file_pairs):
     with open(CONFIG_FILE, "r") as f:
         coords = json.load(f)
 
-    print("\n--- Phase 2: Comparison Engine Execution ---")
-    print("Switch to browser interface in 3 seconds...")
+    print("\n--- Step 2: Running Comparisons ---")
+    print("Switch to browser in 3 seconds...")
     time.sleep(3)
 
     for i, (name, files) in enumerate(file_pairs.items()):
-        print(f"\n[{i+1}/{len(file_pairs)}] PROCESSING: {name}")
+        print(f"\n[{i+1}/{len(file_pairs)}] File: {name}")
         hs_path = files["hs"]
         sf_path = files["sf"]
 
         # 1. UI Automation Sequence
         upload_sequence(coords, hs_path, sf_path)
         time.sleep(5) 
-        print("   Finalizing analysis...")
+        print("   Checking differences...")
         pyautogui.click(coords["EXPORT_BTN"])
         time.sleep(1)
         pyautogui.click(coords["SPLIT_VIEW_BTN"])
