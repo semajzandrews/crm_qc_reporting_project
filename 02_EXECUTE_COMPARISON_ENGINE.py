@@ -160,14 +160,16 @@ def run_comparison_process(file_pairs):
         time.sleep(2.5) 
         
         base_name = f"{name}_Comparison_{timestamp}"
-        if is_mac:
-            pyautogui.hotkey('command', 'shift', 'g')
-            time.sleep(1.0)
+        
+        print(f"   Entering filename: {base_name}")
+        # Focus is already in the field by default on both OS.
+        # Typing immediately ensures the filename is set.
         pyautogui.write(base_name)
-        time.sleep(1)
-        pyautogui.press('enter')
+        time.sleep(2.0) # 2-second wait to let the text and button settle
+        
+        print("   Finalizing export...")
         pyautogui.click(coords["SAVE_BTN"])
-        time.sleep(4)
+        time.sleep(5) # Wait for download to finish
 
         expected_file = os.path.join(DOWNLOADS_DIR, base_name + ".pdf")
         if os.path.exists(expected_file):
