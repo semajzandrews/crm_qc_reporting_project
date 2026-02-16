@@ -189,7 +189,7 @@ def generate_final_analytics():
             current_row += 1
             processed_count += 1
 
-    summary_msg = f"Excel Batch Complete!\n\nProcessed: {processed_count}\nRemaining: {total_pending - processed_count}"
+    summary_msg = f"Excel Batch Complete!\n\nProcessed: {processed_count}\nRemaining: {total_ready - processed_count}"
     print(f"\n{summary_msg}")
     messagebox.showinfo("Batch Complete", summary_msg)
 
