@@ -2,10 +2,26 @@ import openpyxl
 import os
 import re
 import json
+import sys
+import hashlib
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 from pdfminer.high_level import extract_text
 from datetime import datetime
+
+def files_are_identical(path1, path2, chunk_size=8192):
+    """Efficient file comparison using chunked hashing instead of full memory load."""
+    if os.path.getsize(path1) != os.path.getsize(path2):
+        return False
+    h1, h2 = hashlib.md5(), hashlib.md5()
+    with open(path1, 'rb') as f1, open(path2, 'rb') as f2:
+        while True:
+            c1, c2 = f1.read(chunk_size), f2.read(chunk_size)
+            if not c1 and not c2:
+                break
+            h1.update(c1)
+            h2.update(c2)
+    return h1.digest() == h2.digest()
 
 # Relative path configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -14,7 +30,7 @@ TARGETS_FILE = os.path.join(BASE_DIR, "targets.json")
 # Load Configuration from Script 01
 if not os.path.exists(TARGETS_FILE):
     print(f"Error: {os.path.basename(TARGETS_FILE)} not found. Please run Script 01 first.")
-    exit(1)
+    sys.exit(1)
 
 with open(TARGETS_FILE, "r") as f:
     config_meta = json.load(f)
@@ -25,7 +41,7 @@ TEMPLATE_PATH = config_meta.get("template_path")
 TARGETS_DICT = config_meta.get("matches", {})
 
 # Results are always localized to the Template directory
-RESULTS_DIR = os.path.join(os.path.dirname(TEMPLATE_PATH), "QA_ANALYTICS_RESULTS")
+RESULTS_DIR = config_meta.get("results_dir") or os.path.join(os.path.dirname(TEMPLATE_PATH), "QA_ANALYTICS_RESULTS")
 OUTPUT_EXCEL = os.path.join(RESULTS_DIR, 'QA_ANALYTICS_REPORT_FINAL.xlsx')
 LOG_FILE = os.path.join(RESULTS_DIR, "QA_TECHNICAL_EVIDENCE.md")
 
@@ -45,6 +61,14 @@ SECTIONS = [
     {'key': 'Diagnosis', 'marker': 'Calls by Diagnosis', 'next_marker': None}
 ]
 
+# Pre-compile regex patterns once at module load (avoids re-compiling on every call)
+for _sec in SECTIONS:
+    _sec['marker_re'] = re.compile(re.escape(_sec['marker']), re.IGNORECASE)
+    if _sec['next_marker']:
+        _sec['next_marker_re'] = re.compile(re.escape(_sec['next_marker']), re.IGNORECASE)
+    else:
+        _sec['next_marker_re'] = None
+
 def clean_text(text, marker_to_purge=None):
     """Normalize whitespace and remove redundant headers to handle multi-page wraps."""
     if not text: return ""
@@ -60,34 +84,29 @@ def clean_text(text, marker_to_purge=None):
 def get_section_text(text, config):
     """
     Slices PDF text based on greedy anchors to capture multi-page tables.
-    Uses 'Reach Next Expected Text' logic.
+    Uses 'Reach Next Expected Text' logic with pre-compiled patterns.
     """
-    start_marker = config['marker']
-    end_marker = config['next_marker']
+    start_re = config['marker_re']
+    end_re = config.get('next_marker_re')
     
     try:
-        # Find the very first occurrence of the start marker
-        start_match = re.search(re.escape(start_marker), text, re.IGNORECASE)
+        start_match = start_re.search(text)
         if not start_match:
             return None
         
         start_idx = start_match.start()
         
-        # Search for the next expected marker ONLY after the start index
-        if end_marker:
-            end_match = re.search(re.escape(end_marker), text[start_idx + len(start_marker):], re.IGNORECASE)
+        if end_re:
+            end_match = end_re.search(text, start_idx + len(config['marker']))
             if end_match:
-                end_idx = start_idx + len(start_marker) + end_match.start()
+                end_idx = end_match.start()
             else:
-                # If next marker not found, we look for any subsequent marker in the list
-                # to prevent capturing the entire rest of the document
                 end_idx = len(text)
                 for sec in SECTIONS:
-                    if sec['marker'] == start_marker: continue
-                    alt_match = re.search(re.escape(sec['marker']), text[start_idx + len(start_marker):], re.IGNORECASE)
-                    if alt_match:
-                        found_idx = start_idx + len(start_marker) + alt_match.start()
-                        if found_idx < end_idx: end_idx = found_idx
+                    if sec['marker'] == config['marker']: continue
+                    alt_match = sec['marker_re'].search(text, start_idx + len(config['marker']))
+                    if alt_match and alt_match.start() < end_idx:
+                        end_idx = alt_match.start()
         else:
             end_idx = len(text)
             
@@ -105,20 +124,19 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         client_lines.append(f"- {msg}")
         return False
 
-    # 1. Binary comparison check
-    with open(hs_path, 'rb') as f1, open(sf_path, 'rb') as f2:
-        if f1.read() == f2.read():
-            print("   Status: Exact binary match identified.")
-            client_lines.append("- **Overall Result: 0** (Verified Binary Match)")
-            sheet.cell(row=row_idx, column=col_map.get('Tester', 3)).value = TESTER_NAME
-            report_col = col_map.get('Report ') or col_map.get('Report', 4)
-            sheet.cell(row=row_idx, column=report_col).value = client_name
-            for sec in SECTIONS:
-                col_idx = col_map.get(sec['key'])
-                if col_idx: sheet.cell(row=row_idx, column=col_idx).value = 0
-            res_col = col_map.get('Test Result')
-            if res_col: sheet.cell(row=row_idx, column=res_col).value = 0
-            return True
+    # 1. Binary comparison check (chunked hashing — no full memory load)
+    if files_are_identical(hs_path, sf_path):
+        print("   Status: Exact binary match identified.")
+        client_lines.append("- **Overall Result: 0** (Verified Binary Match)")
+        sheet.cell(row=row_idx, column=col_map.get('Tester', 3)).value = TESTER_NAME
+        report_col = col_map.get('Report', 4)
+        sheet.cell(row=row_idx, column=report_col).value = client_name
+        for sec in SECTIONS:
+            col_idx = col_map.get(sec['key'])
+            if col_idx: sheet.cell(row=row_idx, column=col_idx).value = 0
+        res_col = col_map.get('Test Result')
+        if res_col: sheet.cell(row=row_idx, column=res_col).value = 0
+        return True
 
     # 2. Sectional content analysis
     try:
@@ -133,7 +151,7 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
     any_failure = False
     summary_present_in_both = False # Track if Summary Page exists to apply cascading logic later
     sheet.cell(row=row_idx, column=col_map.get('Tester', 3)).value = TESTER_NAME
-    report_col = col_map.get('Report ') or col_map.get('Report', 4)
+    report_col = col_map.get('Report', 4)
     sheet.cell(row=row_idx, column=report_col).value = client_name
 
     for section in SECTIONS:
@@ -246,7 +264,7 @@ def generate_final_analytics():
     header_row = 3
     col_map = {str(cell.value).strip(): idx + 1 for idx, cell in enumerate(sheet[header_row]) if cell.value}
 
-    report_col_idx = col_map.get('Report ') or col_map.get('Report', 4)
+    report_col_idx = col_map.get('Report', 4)
     current_row = header_row + 1
     while sheet.cell(row=current_row, column=report_col_idx).value: current_row += 1
 
@@ -256,13 +274,15 @@ def generate_final_analytics():
         client_lines = []
         if process_client_analysis(sheet, current_row, col_map, client_name, paths['hs'], paths['sf'], client_lines):
             TARGETS_DICT[client_name]['status_excel'] = 'completed'
-            config_meta['matches'] = TARGETS_DICT
-            with open(TARGETS_FILE, "w") as f: json.dump(config_meta, f, indent=4)
-            wb.save(OUTPUT_EXCEL)
             with open(LOG_FILE, "a") as f: f.write("\n".join(client_lines) + "\n")
             print(f"   [FINALIZED] {client_name} (Row {current_row})")
             current_row += 1
             processed_count += 1
+
+    # Save state once after entire batch completes
+    config_meta['matches'] = TARGETS_DICT
+    with open(TARGETS_FILE, "w") as f: json.dump(config_meta, f, indent=4)
+    wb.save(OUTPUT_EXCEL)
 
     messagebox.showinfo("Batch Complete", f"Processed: {processed_count}")
 

@@ -4,10 +4,34 @@ import json
 import os
 import sys
 import platform
+import hashlib
+import subprocess
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 from datetime import datetime
 from pypdf import PdfReader, PdfWriter, PageObject, Transformation
+
+def files_are_identical(path1, path2, chunk_size=8192):
+    """Efficient file comparison using chunked hashing instead of full memory load."""
+    if os.path.getsize(path1) != os.path.getsize(path2):
+        return False
+    h1, h2 = hashlib.md5(), hashlib.md5()
+    with open(path1, 'rb') as f1, open(path2, 'rb') as f2:
+        while True:
+            c1, c2 = f1.read(chunk_size), f2.read(chunk_size)
+            if not c1 and not c2:
+                break
+            h1.update(c1)
+            h2.update(c2)
+    return h1.digest() == h2.digest()
+
+def type_path_via_clipboard(path):
+    """Use clipboard + Cmd+V on macOS to handle special characters in paths."""
+    if platform.system() == "Darwin":
+        subprocess.run(['pbcopy'], input=path.encode(), check=True)
+        pyautogui.hotkey('command', 'v')
+    else:
+        pyautogui.write(path)
 
 # Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +50,7 @@ def generate_side_by_side_pdf(hs_path, sf_path, output_name):
     try:
         reader_hs = PdfReader(hs_path)
         reader_sf = PdfReader(sf_path)
+        # Note: PdfReader doesn't support context managers, closed via writer completion
         writer = PdfWriter()
         num_pages = max(len(reader_hs.pages), len(reader_sf.pages))
         for i in range(num_pages):
@@ -64,7 +89,7 @@ def upload_sequence(coords, hs_path, sf_path):
     if is_mac:
         pyautogui.hotkey('command', 'shift', 'g')
         time.sleep(1.0)
-    pyautogui.write(hs_path)
+    type_path_via_clipboard(hs_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
@@ -76,7 +101,7 @@ def upload_sequence(coords, hs_path, sf_path):
     if is_mac:
         pyautogui.hotkey('command', 'shift', 'g')
         time.sleep(1.0)
-    pyautogui.write(sf_path)
+    type_path_via_clipboard(sf_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
@@ -97,10 +122,9 @@ def calibrate_mode():
         test_hs, test_sf, found_diff = "", "", False
         for name, paths in matches.items():
             try:
-                with open(paths['hs'], 'rb') as f1, open(paths['sf'], 'rb') as f2:
-                    if f1.read() != f2.read():
-                        test_hs, test_sf, found_diff = paths['hs'], paths['sf'], True
-                        break
+                if not files_are_identical(paths['hs'], paths['sf']):
+                    test_hs, test_sf, found_diff = paths['hs'], paths['sf'], True
+                    break
             except Exception: continue
         if not found_diff:
             first_key = list(matches.keys())[0]
@@ -140,10 +164,10 @@ def run_comparison_process(config_meta):
     targets_dict = config_meta.get("matches", {})
     
     # PHYSICAL VERIFICATION: If PDF is missing from RESULTS_DIR, set status_pdf back to 'pending'
+    results_files = os.listdir(RESULTS_DIR) if os.path.exists(RESULTS_DIR) else []
     for name, files in targets_dict.items():
         if files.get('status_pdf') == 'completed':
-            # We don't know the exact timestamp used previously, so we check for any PDF starting with the name
-            pdf_found = any(f.startswith(name) and f.endswith(".pdf") for f in os.listdir(RESULTS_DIR))
+            pdf_found = any(f.startswith(name) and f.endswith(".pdf") for f in results_files)
             if not pdf_found:
                 print(f"   Re-enabling PDF for {name} (File missing from Results)")
                 targets_dict[name]['status_pdf'] = 'pending'
@@ -173,9 +197,7 @@ def run_comparison_process(config_meta):
         print(f"\n[{processed_count+1}/{batch_size}] File: {name}")
         timestamp = datetime.now().strftime("%m%d_%H%M")
         
-        is_identical = False
-        with open(files["hs"], 'rb') as f1, open(files["sf"], 'rb') as f2:
-            if f1.read() == f2.read(): is_identical = True
+        is_identical = files_are_identical(files["hs"], files["sf"])
 
         if is_identical:
             print("   Status: Exact Match found. Generating Local Report...")
@@ -207,13 +229,14 @@ def run_comparison_process(config_meta):
             pyautogui.click(coords["TAB_NEW_BTN"]); time.sleep(2)
             pyautogui.click(coords["DOCUMENT_MODE_BTN"]); time.sleep(2)
 
-        # Update status in config
+        # Mark as completed in-memory
         targets_dict[name]['status_pdf'] = 'completed'
-        config_meta['matches'] = targets_dict
-        with open(TARGETS_FILE, "w") as f:
-            json.dump(config_meta, f, indent=4)
-        
         processed_count += 1
+
+    # Save state once after entire batch completes
+    config_meta['matches'] = targets_dict
+    with open(TARGETS_FILE, "w") as f:
+        json.dump(config_meta, f, indent=4)
 
     summary_msg = f"PDF Batch Complete!\n\nProcessed: {processed_count}\nRemaining: {total_pending - processed_count}"
     print(f"\n{summary_msg}")

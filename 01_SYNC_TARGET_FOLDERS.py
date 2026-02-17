@@ -9,34 +9,35 @@ import re
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TARGETS_FILE = os.path.join(BASE_DIR, "targets.json")
 
-def select_directory(title):
-    root = tk.Tk()
-    root.withdraw()
-    path = filedialog.askdirectory(title=title)
-    root.destroy()
-    return path
+def select_directory(root, title):
+    return filedialog.askdirectory(parent=root, title=title)
 
-def select_file(title, filetypes):
-    root = tk.Tk()
-    root.withdraw()
-    path = filedialog.askopenfilename(title=title, filetypes=filetypes)
-    root.destroy()
-    return path
+def select_file(root, title, filetypes):
+    return filedialog.askopenfilename(parent=root, title=title, filetypes=filetypes)
 
 def synchronize_file_targets():
     """Logic to match and organize files for comparison."""
     print("Initializing Multi-Pass Synchronization Engine...")
     
-    hs_dir = select_directory("STEP 1: Select HubSpot Source Folder (PDFs)")
-    if not hs_dir: return
+    root = tk.Tk()
+    root.withdraw()
+    
+    hs_dir = select_directory(root, "STEP 1: Select HubSpot Source Folder (PDFs)")
+    if not hs_dir:
+        root.destroy()
+        return
     print(f"HubSpot Folder Selected: {hs_dir}")
     
-    sf_dir = select_directory("STEP 2: Select Salesforce Source Folder (PDFs)")
-    if not sf_dir: return
+    sf_dir = select_directory(root, "STEP 2: Select Salesforce Source Folder (PDFs)")
+    if not sf_dir:
+        root.destroy()
+        return
     print(f"Salesforce Folder Selected: {sf_dir}")
 
-    template_path = select_file("STEP 3: Select Excel Data Template (.xlsx)", [("Excel files", "*.xlsx"), ("All files", "*.*")])
-    if not template_path: return
+    template_path = select_file(root, "STEP 3: Select Excel Data Template (.xlsx)", [("Excel files", "*.xlsx"), ("All files", "*.*")])
+    if not template_path:
+        root.destroy()
+        return
     print(f"Template Selected: {template_path}")
 
     # Results Destination
@@ -58,14 +59,18 @@ def synchronize_file_targets():
     exact_matches = hs_pass1.intersection(sf_pass1)
     
     for filename in list(exact_matches):
+        try:
+            shutil.move(os.path.join(hs_dir, filename), os.path.join(RESULTS_MATCH_HS, filename))
+            shutil.move(os.path.join(sf_dir, filename), os.path.join(RESULTS_MATCH_SF, filename))
+        except (OSError, shutil.Error) as e:
+            print(f"   ⚠️ Failed to move '{filename}': {e} — skipping.")
+            continue
         matches[filename] = {
             "hs": os.path.join(RESULTS_MATCH_HS, filename),
             "sf": os.path.join(RESULTS_MATCH_SF, filename),
             "status_pdf": "pending",
             "status_excel": "pending"
         }
-        shutil.move(os.path.join(hs_dir, filename), os.path.join(RESULTS_MATCH_HS, filename))
-        shutil.move(os.path.join(sf_dir, filename), os.path.join(RESULTS_MATCH_SF, filename))
         hs_pool.remove(filename)
         sf_pool.remove(filename)
 
@@ -89,14 +94,18 @@ def synchronize_file_targets():
         sf_count = sum(1 for f in sf_pool if get_base(f) == base)
         
         if hs_count == 1 and sf_count == 1:
+            try:
+                shutil.move(os.path.join(hs_dir, hs_filename), os.path.join(RESULTS_MATCH_HS, hs_filename))
+                shutil.move(os.path.join(sf_dir, sf_filename), os.path.join(RESULTS_MATCH_SF, sf_filename))
+            except (OSError, shutil.Error) as e:
+                print(f"   ⚠️ Failed to move '{base}': {e} — skipping.")
+                continue
             matches[base] = {
                 "hs": os.path.join(RESULTS_MATCH_HS, hs_filename),
                 "sf": os.path.join(RESULTS_MATCH_SF, hs_filename),
                 "status_pdf": "pending",
                 "status_excel": "pending"
             }
-            shutil.move(os.path.join(hs_dir, hs_filename), os.path.join(RESULTS_MATCH_HS, hs_filename))
-            shutil.move(os.path.join(sf_dir, sf_filename), os.path.join(RESULTS_MATCH_SF, sf_filename))
             hs_pool.remove(hs_filename)
             sf_pool.remove(sf_filename)
 
@@ -107,9 +116,15 @@ def synchronize_file_targets():
         if not os.path.exists(d): os.makedirs(d)
         
     for f in list(hs_pool):
-        shutil.move(os.path.join(hs_dir, f), os.path.join(ORPHAN_HS, f))
+        try:
+            shutil.move(os.path.join(hs_dir, f), os.path.join(ORPHAN_HS, f))
+        except (OSError, shutil.Error) as e:
+            print(f"   ⚠️ Failed to move orphan HS '{f}': {e}")
     for f in list(sf_pool):
-        shutil.move(os.path.join(sf_dir, f), os.path.join(ORPHAN_SF, f))
+        try:
+            shutil.move(os.path.join(sf_dir, f), os.path.join(ORPHAN_SF, f))
+        except (OSError, shutil.Error) as e:
+            print(f"   ⚠️ Failed to move orphan SF '{f}': {e}")
 
     # Store metadata for 03 script
     meta = {
@@ -125,6 +140,7 @@ def synchronize_file_targets():
     summary = f"COMPLETED:\nMatches Found: {len(matches)}\nRemaining Unmatched: {len(hs_pool) + len(sf_pool)}"
     print(f"\n{summary}")
     messagebox.showinfo("Extraction Complete", summary)
+    root.destroy()
 
 if __name__ == "__main__":
     synchronize_file_targets()
