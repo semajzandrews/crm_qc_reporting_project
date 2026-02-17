@@ -37,8 +37,8 @@ if not os.path.exists(RESULTS_DIR):
 
 # Identification Anchors - REFINED FOR OVERFLOW AWARENESS
 SECTIONS = [
-    {'key': 'Summary Page', 'marker': 'Year Over Year Comparison of Calls', 'next_marker': 'Calls by Agency'},
-    {'key': 'Site Page', 'marker': 'Calls by Agency', 'next_marker': 'Calls by Day of Week'},
+    {'key': 'Summary Page', 'marker': 'Year Over Year Comparison of Calls', 'next_marker': 'Calls by Site'},
+    {'key': 'Site Page', 'marker': 'Calls by Site', 'next_marker': 'Calls by Day of Week'},
     {'key': 'Day of Week', 'marker': 'Calls by Day of Week', 'next_marker': 'Calls by Hour of Day'},
     {'key': 'Hour of Day', 'marker': 'Calls by Hour of Day', 'next_marker': 'Calls by Outcome'},
     {'key': 'Outcome', 'marker': 'Calls by Outcome', 'next_marker': 'Calls by Diagnosis'},
@@ -142,10 +142,15 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         
         # LOGIC: If a section is missing from one but present in the other
         if hs_raw is None and sf_raw is None:
-            # Special handling for Summary Page: Both missing is Acceptable (Permanent 0).
-            result = 0
-            reason = "Section missing in both sources (Acceptable)"
-            if section['key'] == 'Summary Page': summary_present_in_both = False
+            if section['key'] == 'Summary Page':
+                # Summary Page: Both missing is Acceptable (Permanent 0)
+                result = 0
+                reason = "Section missing in both sources (Acceptable)"
+                summary_present_in_both = False
+            else:
+                # All other sections MUST be present. Missing = detection error = flag it.
+                result = 1
+                reason = "Section missing in both sources (Detection Error)"
         elif hs_raw is None or sf_raw is None:
             result = 1
             reason = "Section presence mismatch"
