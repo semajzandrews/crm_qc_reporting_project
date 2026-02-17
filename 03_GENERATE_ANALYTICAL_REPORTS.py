@@ -11,7 +11,6 @@ from pdfminer.high_level import extract_text
 from datetime import datetime
 
 def files_are_identical(path1, path2, chunk_size=8192):
-    """Efficient file comparison using chunked hashing instead of full memory load."""
     if os.path.getsize(path1) != os.path.getsize(path2):
         return False
     h1, h2 = hashlib.md5(), hashlib.md5()
@@ -24,11 +23,9 @@ def files_are_identical(path1, path2, chunk_size=8192):
             h2.update(c2)
     return h1.digest() == h2.digest()
 
-# Relative path configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TARGETS_FILE = os.path.join(BASE_DIR, "targets.json")
 
-# Load Configuration from Script 01
 if not os.path.exists(TARGETS_FILE):
     print(f"Error: {os.path.basename(TARGETS_FILE)} not found. Please run Script 01 first.")
     sys.exit(1)
@@ -41,7 +38,6 @@ SF_DIR = config_meta.get("sf_dir")
 TEMPLATE_PATH = config_meta.get("template_path")
 TARGETS_DICT = config_meta.get("matches", {})
 
-# Results are always localized to the Template directory
 RESULTS_DIR = config_meta.get("results_dir") or os.path.join(os.path.dirname(TEMPLATE_PATH), "QA_ANALYTICS_RESULTS")
 OUTPUT_EXCEL = os.path.join(RESULTS_DIR, 'QA_ANALYTICS_REPORT_FINAL.xlsx')
 LOG_FILE = os.path.join(RESULTS_DIR, "QA_TECHNICAL_EVIDENCE.md")
@@ -52,7 +48,6 @@ TESTER_NAME = "Semaj Andrews"
 if not os.path.exists(RESULTS_DIR):
     os.makedirs(RESULTS_DIR)
 
-# Identification Anchors - REFINED FOR OVERFLOW AWARENESS
 SECTIONS = [
     {'key': 'Summary Page', 'marker': 'Year Over Year Comparison of Calls', 'next_marker': 'Calls by Site'},
     {'key': 'Site Page', 'marker': 'Calls by Site', 'next_marker': 'Calls by Day of Week'},
@@ -62,7 +57,6 @@ SECTIONS = [
     {'key': 'Diagnosis', 'marker': 'Calls by Diagnosis', 'next_marker': None}
 ]
 
-# Pre-compile regex patterns once at module load (avoids re-compiling on every call)
 for _sec in SECTIONS:
     _sec['marker_re'] = re.compile(re.escape(_sec['marker']), re.IGNORECASE)
     if _sec['next_marker']:
@@ -71,22 +65,13 @@ for _sec in SECTIONS:
         _sec['next_marker_re'] = None
 
 def clean_text(text, marker_to_purge=None):
-    """Normalize whitespace and remove redundant headers to handle multi-page wraps."""
     if not text: return ""
-    
-    # 1. Strip redundant headers that repeat on page wraps
     if marker_to_purge:
         text = re.sub(re.escape(marker_to_purge), '', text, flags=re.IGNORECASE)
-    
-    # 2. Collapse whitespace
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
 def get_section_text(text, config):
-    """
-    Slices PDF text based on greedy anchors to capture multi-page tables.
-    Uses 'Reach Next Expected Text' logic with pre-compiled patterns.
-    """
     start_re = config['marker_re']
     end_re = config.get('next_marker_re')
     
@@ -125,7 +110,6 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         client_lines.append(f"- {msg}")
         return False
 
-    # 1. Binary comparison check (chunked hashing — no full memory load)
     if files_are_identical(hs_path, sf_path):
         print("   Status: Exact binary match identified.")
         client_lines.append("- **Overall Result: 0** (Verified Binary Match)")
@@ -139,7 +123,6 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         if res_col: sheet.cell(row=row_idx, column=res_col).value = 0
         return True
 
-    # 2. Sectional content analysis
     try:
         text_hs = extract_text(hs_path)
         text_sf = extract_text(sf_path)
@@ -150,7 +133,7 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         return False
 
     any_failure = False
-    summary_present_in_both = False # Track if Summary Page exists to apply cascading logic later
+    summary_present_in_both = False
     sheet.cell(row=row_idx, column=col_map.get('Tester', 3)).value = TESTER_NAME
     report_col = col_map.get('Report', 4)
     sheet.cell(row=row_idx, column=report_col).value = client_name
@@ -159,30 +142,24 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         hs_raw = get_section_text(text_hs, section)
         sf_raw = get_section_text(text_sf, section)
         
-        # LOGIC: If a section is missing from one but present in the other
         if hs_raw is None and sf_raw is None:
             if section['key'] == 'Summary Page':
-                # Summary Page: Both missing is Acceptable (Permanent 0)
                 result = 0
                 reason = "Section missing in both sources (Acceptable)"
                 summary_present_in_both = False
             else:
-                # All other sections MUST be present. Missing = detection error = flag it.
                 result = 1
                 reason = "Section missing in both sources (Detection Error)"
         elif hs_raw is None or sf_raw is None:
             result = 1
             reason = "Section presence mismatch"
-            if section['key'] == 'Summary Page': summary_present_in_both = False # Already failed
+            if section['key'] == 'Summary Page': summary_present_in_both = False
         else:
             if section['key'] == 'Summary Page': summary_present_in_both = True
             
-            # STRIP REPEATED HEADERS BEFORE COMPARING
             clean_hs = clean_text(hs_raw, section['marker'])
             clean_sf = clean_text(sf_raw, section['marker'])
             
-            # VOLUME GUARD: If data was found but it is just empty whitespace or single words
-            # Adjusted threshold to 10 chars to be safe but catch empty tables
             if len(clean_hs) < 10 and len(clean_sf) < 10:
                 result = 0
                 reason = "Empty table match"
@@ -190,7 +167,6 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
                 result = 1
                 reason = "Content volume mismatch (One side empty)"
             else:
-                # Token-frequency comparison: immune to pdfminer extraction ordering
                 hs_tokens = Counter(clean_hs.split())
                 sf_tokens = Counter(clean_sf.split())
                 result = 0 if hs_tokens == sf_tokens else 1
@@ -202,9 +178,6 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         col_idx = col_map.get(section['key'])
         if col_idx: sheet.cell(row=row_idx, column=col_idx).value = result
         
-    # 3. Final Integrity Guard: Summary Page inherits sub-page failures
-    # This overrides the result ONLY if the Summary Page was actually present in both.
-    # If it was missing in both (Acceptable), it stays 0 regardless of other failures.
     summary_key = 'Summary Page'
     summary_col = col_map.get(summary_key)
     if any_failure and summary_col and summary_present_in_both:
@@ -216,7 +189,6 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
                 found_summary_line = True
                 break
         if not found_summary_line:
-             # If summary was already 1, we don't need to change the log, but the logic holds.
              pass
     
     test_result_col = col_map.get('Test Result')
@@ -226,7 +198,6 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
     return True
 
 def generate_final_analytics():
-    """Generate Excel report and text log with batching and physical verification."""
     root = tk.Tk()
     root.withdraw()
     
@@ -283,7 +254,6 @@ def generate_final_analytics():
             current_row += 1
             processed_count += 1
 
-    # Save state once after entire batch completes
     config_meta['matches'] = TARGETS_DICT
     with open(TARGETS_FILE, "w") as f: json.dump(config_meta, f, indent=4)
     wb.save(OUTPUT_EXCEL)

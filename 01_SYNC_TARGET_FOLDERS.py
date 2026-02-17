@@ -5,7 +5,6 @@ import json
 import shutil
 import re
 
-# Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TARGETS_FILE = os.path.join(BASE_DIR, "targets.json")
 
@@ -16,7 +15,6 @@ def select_file(root, title, filetypes):
     return filedialog.askopenfilename(parent=root, title=title, filetypes=filetypes)
 
 def synchronize_file_targets():
-    """Logic to match and organize files for comparison."""
     print("Initializing Multi-Pass Synchronization Engine...")
     
     root = tk.Tk()
@@ -40,19 +38,16 @@ def synchronize_file_targets():
         return
     print(f"Template Selected: {template_path}")
 
-    # Results Destination
     RESULTS_MATCH_HS = os.path.join(hs_dir, "MATCHED_PAIRS")
     RESULTS_MATCH_SF = os.path.join(sf_dir, "MATCHED_PAIRS")
     for d in [RESULTS_MATCH_HS, RESULTS_MATCH_SF]:
         if not os.path.exists(d): os.makedirs(d)
 
-    # Initial lists
     hs_pool = [f for f in os.listdir(hs_dir) if f.endswith('.pdf')]
     sf_pool = [f for f in os.listdir(sf_dir) if f.endswith('.pdf')]
     
     matches = {}
 
-    # --- Phase 1: Filename Match ---
     print("Phase 1: Checking for exact filename matches...")
     hs_pass1 = set(hs_pool)
     sf_pass1 = set(sf_pool)
@@ -74,7 +69,6 @@ def synchronize_file_targets():
         hs_pool.remove(filename)
         sf_pool.remove(filename)
 
-    # --- Phase 2: Name Match ---
     print("Phase 2: Matching by truncating timestamps...")
     
     def get_base(f):
@@ -89,7 +83,6 @@ def synchronize_file_targets():
         hs_filename = hs_map[base]
         sf_filename = sf_map[base]
         
-        # Verify it's truly 1:1 at the truncated level to avoid collisions
         hs_count = sum(1 for f in hs_pool if get_base(f) == base)
         sf_count = sum(1 for f in sf_pool if get_base(f) == base)
         
@@ -109,7 +102,6 @@ def synchronize_file_targets():
             hs_pool.remove(hs_filename)
             sf_pool.remove(sf_filename)
 
-    # --- Phase 3: Orphan Processing ---
     ORPHAN_HS = os.path.join(hs_dir, "UNMATCHED_PAIRS")
     ORPHAN_SF = os.path.join(sf_dir, "UNMATCHED_PAIRS")
     for d in [ORPHAN_HS, ORPHAN_SF]:
@@ -126,7 +118,6 @@ def synchronize_file_targets():
         except (OSError, shutil.Error) as e:
             print(f"   ⚠️ Failed to move orphan SF '{f}': {e}")
 
-    # Store metadata for 03 script
     meta = {
         "hs_dir": hs_dir,
         "sf_dir": sf_dir,

@@ -5,14 +5,12 @@ import os
 import sys
 import platform
 import hashlib
-import subprocess
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 from datetime import datetime
 from pypdf import PdfReader, PdfWriter, PageObject, Transformation
 
 def files_are_identical(path1, path2, chunk_size=8192):
-    """Efficient file comparison using chunked hashing instead of full memory load."""
     if os.path.getsize(path1) != os.path.getsize(path2):
         return False
     h1, h2 = hashlib.md5(), hashlib.md5()
@@ -25,32 +23,20 @@ def files_are_identical(path1, path2, chunk_size=8192):
             h2.update(c2)
     return h1.digest() == h2.digest()
 
-def type_path_via_clipboard(path):
-    """Use clipboard + Cmd+V on macOS to handle special characters in paths."""
-    if platform.system() == "Darwin":
-        subprocess.run(['pbcopy'], input=path.encode(), check=True)
-        pyautogui.hotkey('command', 'v')
-    else:
-        pyautogui.write(path)
-
-# Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "diff_config.json")
 TARGETS_FILE = os.path.join(BASE_DIR, "targets.json")
 DOWNLOADS_DIR = os.path.expanduser("~/Downloads/")
 RESULTS_DIR = os.path.join(DOWNLOADS_DIR, "QA_ANALYTICS_RESULTS/")
 
-# Ensure Results Directory Exists
 if not os.path.exists(RESULTS_DIR):
     os.makedirs(RESULTS_DIR)
 
 def generate_side_by_side_pdf(hs_path, sf_path, output_name):
-    """Generates a Side-by-Side merged PDF locally."""
     print(f"   Generating local report: {output_name}")
     try:
         reader_hs = PdfReader(hs_path)
         reader_sf = PdfReader(sf_path)
-        # Note: PdfReader doesn't support context managers, closed via writer completion
         writer = PdfWriter()
         num_pages = max(len(reader_hs.pages), len(reader_sf.pages))
         for i in range(num_pages):
@@ -78,7 +64,6 @@ def generate_side_by_side_pdf(hs_path, sf_path, output_name):
         return False
 
 def upload_sequence(coords, hs_path, sf_path):
-    """Execute the file upload automation sequence with Cross-Platform support."""
     is_mac = platform.system() == "Darwin"
     if "COMPARISON_AREA" in coords:
         pyautogui.click(coords["COMPARISON_AREA"])
@@ -89,7 +74,7 @@ def upload_sequence(coords, hs_path, sf_path):
     if is_mac:
         pyautogui.hotkey('command', 'shift', 'g')
         time.sleep(1.0)
-    type_path_via_clipboard(hs_path)
+    pyautogui.write(hs_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
@@ -101,7 +86,7 @@ def upload_sequence(coords, hs_path, sf_path):
     if is_mac:
         pyautogui.hotkey('command', 'shift', 'g')
         time.sleep(1.0)
-    type_path_via_clipboard(sf_path)
+    pyautogui.write(sf_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
@@ -111,7 +96,6 @@ def upload_sequence(coords, hs_path, sf_path):
     pyautogui.click(coords["FIND_DIFF_BTN"])
 
 def calibrate_mode():
-    """Map screen coordinates for automation with live execution during setup."""
     print("\n--- LIVE CALIBRATION SETUP ---")
     if not os.path.exists(TARGETS_FILE):
         print("Error: targets.json not found.")
@@ -157,13 +141,11 @@ def calibrate_mode():
     except KeyboardInterrupt: print("\nAborted.")
 
 def run_comparison_process(config_meta):
-    """Main execution loop with physical file verification."""
     if not os.path.exists(CONFIG_FILE): return
     with open(CONFIG_FILE, "r") as f: coords = json.load(f)
     
     targets_dict = config_meta.get("matches", {})
     
-    # PHYSICAL VERIFICATION: If PDF is missing from RESULTS_DIR, set status_pdf back to 'pending'
     results_files = os.listdir(RESULTS_DIR) if os.path.exists(RESULTS_DIR) else []
     for name, files in targets_dict.items():
         if files.get('status_pdf') == 'completed':
@@ -229,11 +211,9 @@ def run_comparison_process(config_meta):
             pyautogui.click(coords["TAB_NEW_BTN"]); time.sleep(2)
             pyautogui.click(coords["DOCUMENT_MODE_BTN"]); time.sleep(2)
 
-        # Mark as completed in-memory
         targets_dict[name]['status_pdf'] = 'completed'
         processed_count += 1
 
-    # Save state once after entire batch completes
     config_meta['matches'] = targets_dict
     with open(TARGETS_FILE, "w") as f:
         json.dump(config_meta, f, indent=4)
