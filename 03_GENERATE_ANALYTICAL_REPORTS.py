@@ -4,6 +4,7 @@ import re
 import json
 import sys
 import hashlib
+from collections import Counter
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 from pdfminer.high_level import extract_text
@@ -189,7 +190,10 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
                 result = 1
                 reason = "Content volume mismatch (One side empty)"
             else:
-                result = 0 if clean_hs == clean_sf else 1
+                # Token-frequency comparison: immune to pdfminer extraction ordering
+                hs_tokens = Counter(clean_hs.split())
+                sf_tokens = Counter(clean_sf.split())
+                result = 0 if hs_tokens == sf_tokens else 1
                 reason = "Data Match" if result == 0 else "Data Discrepancy Identified"
             
         if result == 1: any_failure = True
