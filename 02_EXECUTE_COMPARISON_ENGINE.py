@@ -32,8 +32,8 @@ RESULTS_DIR = os.path.join(DOWNLOADS_DIR, "QA_ANALYTICS_RESULTS/")
 if not os.path.exists(RESULTS_DIR):
     os.makedirs(RESULTS_DIR)
 
-def generate_side_by_side_pdf(hs_path, sf_path, output_name):
-    print(f"   Generating local report: {output_name}")
+def generate_side_by_side_pdf(hs_path, sf_path, output_path):
+    print(f"   Generating local report: {os.path.basename(output_path)}")
     try:
         reader_hs = PdfReader(hs_path)
         reader_sf = PdfReader(sf_path)
@@ -54,10 +54,9 @@ def generate_side_by_side_pdf(hs_path, sf_path, output_name):
                 op = Transformation().translate(tx=hs_width, ty=0)
                 new_page.merge_transformed_page(sf_page, op)
             writer.add_page(new_page)
-        full_output_path = os.path.join(RESULTS_DIR, output_name)
-        with open(full_output_path, "wb") as f:
+        with open(output_path, "wb") as f:
             writer.write(f)
-        print(f"   ✅ Local Report Generated: {output_name}")
+        print(f"   ✅ Local Report Generated: {os.path.basename(output_path)}")
         return True
     except Exception as e:
         print(f"   ❌ Generation failed: {e}")
@@ -70,7 +69,7 @@ def upload_sequence(coords, hs_path, sf_path):
         time.sleep(0.5)
     print("   Uploading primary file...")
     pyautogui.click(coords["LEFT_BROWSE"])
-    time.sleep(2.0) 
+    time.sleep(2.0)
     if is_mac:
         pyautogui.hotkey('command', 'shift', 'g')
         time.sleep(1.0)
@@ -116,7 +115,7 @@ def calibrate_mode():
 
     new_config = {}
     try:
-        targets = [("COMPARISON_AREA", "Middle of page"), ("LEFT_BROWSE", "Left Browse"), 
+        targets = [("COMPARISON_AREA", "Middle of page"), ("LEFT_BROWSE", "Left Browse"),
                    ("RIGHT_BROWSE", "Right Browse"), ("FIND_DIFF_BTN", "Find Difference")]
         for key, desc in targets:
             input(f"👉 Hover over: [{desc}] and press ENTER...")
@@ -127,8 +126,8 @@ def calibrate_mode():
         upload_sequence(new_config, test_hs, test_sf)
         time.sleep(5)
 
-        targets_v2 = [("EXPORT_BTN", "Top Right Export"), ("SPLIT_VIEW_BTN", "Side-by-Side PDF"), 
-                      ("SAVE_BTN", "BLUE Export button"), ("TAB_CLOSE_BTN", "Tab Close 'X'"), 
+        targets_v2 = [("EXPORT_BTN", "Top Right Export"), ("SPLIT_VIEW_BTN", "Side-by-Side PDF"),
+                      ("SAVE_BTN", "BLUE Export button"), ("TAB_CLOSE_BTN", "Tab Close 'X'"),
                       ("TAB_NEW_BTN", "Tab New '+'"), ("DOCUMENT_MODE_BTN", "Diffchecker Home")]
         for key, desc in targets_v2:
             input(f"👉 Hover over: [{desc}] and press ENTER...")
@@ -143,56 +142,68 @@ def calibrate_mode():
 def run_comparison_process(config_meta):
     if not os.path.exists(CONFIG_FILE): return
     with open(CONFIG_FILE, "r") as f: coords = json.load(f)
-    
+
     targets_dict = config_meta.get("matches", {})
-    
-    results_files = os.listdir(RESULTS_DIR) if os.path.exists(RESULTS_DIR) else []
+
+    all_result_files = []
+    for root_dir, dirs, files in os.walk(RESULTS_DIR):
+        for f in files:
+            all_result_files.append(f)
+
     for name, files in targets_dict.items():
         if files.get('status_pdf') == 'completed':
-            pdf_found = any(f.startswith(name) and f.endswith(".pdf") for f in results_files)
+            pdf_found = any(f.startswith(name) and f.endswith(".pdf") for f in all_result_files)
             if not pdf_found:
                 print(f"   Re-enabling PDF for {name} (File missing from Results)")
                 targets_dict[name]['status_pdf'] = 'pending'
 
     pending_targets = {k: v for k, v in targets_dict.items() if v.get('status_pdf', 'pending') == 'pending'}
     total_pending = len(pending_targets)
-    
+
     if total_pending == 0:
         messagebox.showinfo("Complete", "No pending PDF comparisons left!")
         return
 
     root = tk.Tk()
     root.withdraw()
-    batch_size = simpledialog.askinteger("Batch Size", 
-                                       f"Total Pending PDFs: {total_pending}\n\nHow many pairs would you like to process?\n(Recommended: 10)", 
-                                       initialvalue=10, minvalue=1, maxvalue=total_pending)
+    batch_size = simpledialog.askinteger("Batch Size",
+                                       f"Total Pending PDFs: {total_pending}\n\nHow many pairs would you like to process?\n(Recommended: 3-5)",
+                                       initialvalue=5, minvalue=1, maxvalue=total_pending)
     if not batch_size: return
+
+    batch_timestamp = datetime.now().strftime("%m%d_%H%M")
+    batch_folder = os.path.join(RESULTS_DIR, f"BATCH_{batch_timestamp}")
+    os.makedirs(batch_folder, exist_ok=True)
+    print(f"\n📁 Batch folder: BATCH_{batch_timestamp}")
 
     is_mac = platform.system() == "Darwin"
     print("\n--- Step 2: Running Comparisons ---")
     time.sleep(3)
 
     processed_count = 0
+    batch_clients = []
+
     for name, files in pending_targets.items():
         if processed_count >= batch_size: break
-        
+
         print(f"\n[{processed_count+1}/{batch_size}] File: {name}")
         timestamp = datetime.now().strftime("%m%d_%H%M")
-        
+
         is_identical = files_are_identical(files["hs"], files["sf"])
 
         if is_identical:
             print("   Status: Exact Match found. Generating Local Report...")
             out_name = f"{name}_MATCH_{timestamp}.pdf"
-            generate_side_by_side_pdf(files["hs"], files["sf"], out_name)
+            output_path = os.path.join(batch_folder, out_name)
+            generate_side_by_side_pdf(files["hs"], files["sf"], output_path)
         else:
             upload_sequence(coords, files["hs"], files["sf"])
-            time.sleep(6) 
+            time.sleep(6)
             pyautogui.click(coords["EXPORT_BTN"])
             time.sleep(1.5)
             pyautogui.click(coords["SPLIT_VIEW_BTN"])
-            time.sleep(2.5) 
-            
+            time.sleep(2.5)
+
             base_name = f"{name}_Comparison_{timestamp}"
             pyautogui.write(base_name)
             time.sleep(2.0)
@@ -201,24 +212,34 @@ def run_comparison_process(config_meta):
 
             expected_file = os.path.join(DOWNLOADS_DIR, base_name + ".pdf")
             if os.path.exists(expected_file):
-                os.rename(expected_file, os.path.join(RESULTS_DIR, base_name + ".pdf"))
+                os.rename(expected_file, os.path.join(batch_folder, base_name + ".pdf"))
             else:
                 print("   ⚠️ Export failed. Generating Local Fallback...")
                 out_name = f"{name}_Comparison_{timestamp}.pdf"
-                generate_side_by_side_pdf(files["hs"], files["sf"], out_name)
+                output_path = os.path.join(batch_folder, out_name)
+                generate_side_by_side_pdf(files["hs"], files["sf"], output_path)
 
             pyautogui.click(coords["TAB_CLOSE_BTN"]); time.sleep(1)
             pyautogui.click(coords["TAB_NEW_BTN"]); time.sleep(2)
             pyautogui.click(coords["DOCUMENT_MODE_BTN"]); time.sleep(2)
 
         targets_dict[name]['status_pdf'] = 'completed'
+        batch_clients.append(name)
         processed_count += 1
+
+    manifest = {
+        "batch_timestamp": batch_timestamp,
+        "processed_count": processed_count,
+        "clients": batch_clients
+    }
+    with open(os.path.join(batch_folder, "batch_manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=4)
 
     config_meta['matches'] = targets_dict
     with open(TARGETS_FILE, "w") as f:
         json.dump(config_meta, f, indent=4)
 
-    summary_msg = f"PDF Batch Complete!\n\nProcessed: {processed_count}\nRemaining: {total_pending - processed_count}"
+    summary_msg = f"PDF Batch Complete!\n\nBatch: BATCH_{batch_timestamp}\nProcessed: {processed_count}\nRemaining: {total_pending - processed_count}"
     print(f"\n{summary_msg}")
     messagebox.showinfo("Batch Complete", summary_msg)
 
