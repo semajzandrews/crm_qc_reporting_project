@@ -7,35 +7,16 @@ from tkinter import simpledialog, messagebox
 from pdfminer.high_level import extract_text
 from datetime import datetime
 
-# Relative path configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TARGETS_FILE = os.path.join(BASE_DIR, "targets.json")
-
-# Load Configuration from Script 01
-if not os.path.exists(TARGETS_FILE):
-    print(f"Error: {os.path.basename(TARGETS_FILE)} not found. Please run Script 01 first.")
-    exit(1)
-
-with open(TARGETS_FILE, "r") as f:
-    config_meta = json.load(f)
-
-HS_DIR = config_meta.get("hs_dir")
-SF_DIR = config_meta.get("sf_dir")
-TEMPLATE_PATH = config_meta.get("template_path")
-TARGETS_DICT = config_meta.get("matches", {})
-
-# Results are always localized to the Template directory
-RESULTS_DIR = os.path.join(os.path.dirname(TEMPLATE_PATH), "QA_ANALYTICS_RESULTS")
+DOWNLOADS_DIR = os.path.expanduser("~/Downloads/")
+RESULTS_DIR = os.path.join(DOWNLOADS_DIR, "QA_ANALYTICS_RESULTS")
 OUTPUT_EXCEL = os.path.join(RESULTS_DIR, 'QA_ANALYTICS_REPORT_FINAL.xlsx')
 LOG_FILE = os.path.join(RESULTS_DIR, "QA_TECHNICAL_EVIDENCE.md")
 
 SHEET_NAME = 'QA Report Test Tracker'
 TESTER_NAME = "Semaj Andrews"
 
-if not os.path.exists(RESULTS_DIR):
-    os.makedirs(RESULTS_DIR)
-
-# Identification Anchors - REFINED FOR OVERFLOW AWARENESS
 SECTIONS = [
     {'key': 'Summary Page', 'marker': 'Year Over Year Comparison of Calls', 'next_marker': 'Calls by Agency'},
     {'key': 'Site Page', 'marker': 'Calls by Agency', 'next_marker': 'Calls by Day of Week'},
@@ -49,11 +30,9 @@ def clean_text(text, marker_to_purge=None):
     """Normalize whitespace and remove redundant headers to handle multi-page wraps."""
     if not text: return ""
     
-    # 1. Strip redundant headers that repeat on page wraps
     if marker_to_purge:
         text = re.sub(re.escape(marker_to_purge), '', text, flags=re.IGNORECASE)
     
-    # 2. Collapse whitespace
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
@@ -66,21 +45,17 @@ def get_section_text(text, config):
     end_marker = config['next_marker']
     
     try:
-        # Find the very first occurrence of the start marker
         start_match = re.search(re.escape(start_marker), text, re.IGNORECASE)
         if not start_match:
             return None
         
         start_idx = start_match.start()
         
-        # Search for the next expected marker ONLY after the start index
         if end_marker:
             end_match = re.search(re.escape(end_marker), text[start_idx + len(start_marker):], re.IGNORECASE)
             if end_match:
                 end_idx = start_idx + len(start_marker) + end_match.start()
             else:
-                # If next marker not found, we look for any subsequent marker in the list
-                # to prevent capturing the entire rest of the document
                 end_idx = len(text)
                 for sec in SECTIONS:
                     if sec['marker'] == start_marker: continue
@@ -105,7 +80,6 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         client_lines.append(f"- {msg}")
         return False
 
-    # 1. Binary comparison check
     with open(hs_path, 'rb') as f1, open(sf_path, 'rb') as f2:
         if f1.read() == f2.read():
             print("   Status: Exact binary match identified.")
@@ -120,7 +94,6 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
             if res_col: sheet.cell(row=row_idx, column=res_col).value = 0
             return True
 
-    # 2. Sectional content analysis
     try:
         text_hs = extract_text(hs_path)
         text_sf = extract_text(sf_path)
@@ -131,7 +104,7 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         return False
 
     any_failure = False
-    summary_present_in_both = False # Track if Summary Page exists to apply cascading logic later
+    summary_present_in_both = False
     sheet.cell(row=row_idx, column=col_map.get('Tester', 3)).value = TESTER_NAME
     report_col = col_map.get('Report ') or col_map.get('Report', 4)
     sheet.cell(row=row_idx, column=report_col).value = client_name
@@ -140,25 +113,20 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         hs_raw = get_section_text(text_hs, section)
         sf_raw = get_section_text(text_sf, section)
         
-        # LOGIC: If a section is missing from one but present in the other
         if hs_raw is None and sf_raw is None:
-            # Special handling for Summary Page: Both missing is Acceptable (Permanent 0).
             result = 0
             reason = "Section missing in both sources (Acceptable)"
             if section['key'] == 'Summary Page': summary_present_in_both = False
         elif hs_raw is None or sf_raw is None:
             result = 1
             reason = "Section presence mismatch"
-            if section['key'] == 'Summary Page': summary_present_in_both = False # Already failed
+            if section['key'] == 'Summary Page': summary_present_in_both = False
         else:
             if section['key'] == 'Summary Page': summary_present_in_both = True
             
-            # STRIP REPEATED HEADERS BEFORE COMPARING
             clean_hs = clean_text(hs_raw, section['marker'])
             clean_sf = clean_text(sf_raw, section['marker'])
             
-            # VOLUME GUARD: If data was found but it is just empty whitespace or single words
-            # Adjusted threshold to 10 chars to be safe but catch empty tables
             if len(clean_hs) < 10 and len(clean_sf) < 10:
                 result = 0
                 reason = "Empty table match"
@@ -175,22 +143,14 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
         col_idx = col_map.get(section['key'])
         if col_idx: sheet.cell(row=row_idx, column=col_idx).value = result
         
-    # 3. Final Integrity Guard: Summary Page inherits sub-page failures
-    # This overrides the result ONLY if the Summary Page was actually present in both.
-    # If it was missing in both (Acceptable), it stays 0 regardless of other failures.
     summary_key = 'Summary Page'
     summary_col = col_map.get(summary_key)
     if any_failure and summary_col and summary_present_in_both:
         sheet.cell(row=row_idx, column=summary_col).value = 1
-        found_summary_line = False
         for i, line in enumerate(client_lines):
             if f"**{summary_key}**: 0" in line:
                 client_lines[i] = f"- **{summary_key}**: 1 (Inferred mismatch: Supplemental data errors detected)"
-                found_summary_line = True
                 break
-        if not found_summary_line:
-             # If summary was already 1, we don't need to change the log, but the logic holds.
-             pass
     
     test_result_col = col_map.get('Test Result')
     overall = 1 if any_failure else 0
@@ -200,11 +160,28 @@ def process_client_analysis(sheet, row_idx, col_map, client_name, hs_path, sf_pa
 
 def generate_final_analytics():
     """Generate Excel report and text log with batching and physical verification."""
+    if not os.path.exists(TARGETS_FILE):
+        print(f"Error: {os.path.basename(TARGETS_FILE)} not found. Please run Script 01 first.")
+        return
+
+    with open(TARGETS_FILE, "r") as f:
+        config_meta = json.load(f)
+
+    template_path = config_meta.get("template_path")
+    if not template_path:
+        print("Error: template_path missing from targets.json. Re-run Script 01.")
+        return
+
+    targets_dict = config_meta.get("matches", {})
+
+    if not os.path.exists(RESULTS_DIR):
+        os.makedirs(RESULTS_DIR)
+
     root = tk.Tk()
     root.withdraw()
     
     if not os.path.exists(OUTPUT_EXCEL):
-        for name in TARGETS_DICT: TARGETS_DICT[name]['status_excel'] = 'pending'
+        for name in targets_dict: targets_dict[name]['status_excel'] = 'pending'
     else:
         wb_check = openpyxl.load_workbook(OUTPUT_EXCEL)
         sheet_check = wb_check[SHEET_NAME]
@@ -217,15 +194,15 @@ def generate_final_analytics():
         existing_agencies = {str(sheet_check.cell(row=r, column=report_col_idx).value).strip() 
                              for r in range(header_row + 1, sheet_check.max_row + 1) 
                              if sheet_check.cell(row=r, column=report_col_idx).value}
-        for name in TARGETS_DICT:
-            TARGETS_DICT[name]['status_excel'] = 'completed' if name in existing_agencies else 'pending'
+        for name in targets_dict:
+            targets_dict[name]['status_excel'] = 'completed' if name in existing_agencies else 'pending'
 
-    ready_targets = {k: v for k, v in TARGETS_DICT.items() 
+    ready_targets = {k: v for k, v in targets_dict.items() 
                      if v.get('status_pdf') == 'completed' and v.get('status_excel', 'pending') == 'pending'}
     total_ready = len(ready_targets)
     
     if total_ready == 0:
-        if any(v.get('status_pdf', 'pending') == 'pending' for v in TARGETS_DICT.values()):
+        if any(v.get('status_pdf', 'pending') == 'pending' for v in targets_dict.values()):
             messagebox.showwarning("Prerequisite Not Met", "No files ready. Run Script 02 first.")
         else:
             messagebox.showinfo("Complete", "All processed!")
@@ -235,7 +212,7 @@ def generate_final_analytics():
                                        initialvalue=total_ready, minvalue=1, maxvalue=total_ready)
     if not batch_size: return
 
-    target_excel = OUTPUT_EXCEL if os.path.exists(OUTPUT_EXCEL) else TEMPLATE_PATH
+    target_excel = OUTPUT_EXCEL if os.path.exists(OUTPUT_EXCEL) else template_path
     wb = openpyxl.load_workbook(target_excel)
     sheet = wb[SHEET_NAME]
     header_row = 3
@@ -250,8 +227,8 @@ def generate_final_analytics():
         if processed_count >= batch_size: break
         client_lines = []
         if process_client_analysis(sheet, current_row, col_map, client_name, paths['hs'], paths['sf'], client_lines):
-            TARGETS_DICT[client_name]['status_excel'] = 'completed'
-            config_meta['matches'] = TARGETS_DICT
+            targets_dict[client_name]['status_excel'] = 'completed'
+            config_meta['matches'] = targets_dict
             with open(TARGETS_FILE, "w") as f: json.dump(config_meta, f, indent=4)
             wb.save(OUTPUT_EXCEL)
             with open(LOG_FILE, "a") as f: f.write("\n".join(client_lines) + "\n")

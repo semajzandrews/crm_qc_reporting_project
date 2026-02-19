@@ -58,16 +58,23 @@ def synchronize_file_targets():
     exact_matches = hs_pass1.intersection(sf_pass1)
     
     for filename in list(exact_matches):
-        matches[filename] = {
-            "hs": os.path.join(RESULTS_MATCH_HS, filename),
-            "sf": os.path.join(RESULTS_MATCH_SF, filename),
-            "status_pdf": "pending",
-            "status_excel": "pending"
-        }
-        shutil.move(os.path.join(hs_dir, filename), os.path.join(RESULTS_MATCH_HS, filename))
-        shutil.move(os.path.join(sf_dir, filename), os.path.join(RESULTS_MATCH_SF, filename))
-        hs_pool.remove(filename)
-        sf_pool.remove(filename)
+        try:
+            hs_src = os.path.join(hs_dir, filename)
+            sf_src = os.path.join(sf_dir, filename)
+            hs_dst = os.path.join(RESULTS_MATCH_HS, filename)
+            sf_dst = os.path.join(RESULTS_MATCH_SF, filename)
+            shutil.move(hs_src, hs_dst)
+            shutil.move(sf_src, sf_dst)
+            matches[filename] = {
+                "hs": hs_dst,
+                "sf": sf_dst,
+                "status_pdf": "pending",
+                "status_excel": "pending"
+            }
+            hs_pool.remove(filename)
+            sf_pool.remove(filename)
+        except Exception as e:
+            print(f"   ⚠️ Skipping {filename}: {e}")
 
     # --- Phase 2: Name Match ---
     print("Phase 2: Matching by truncating timestamps...")
@@ -89,16 +96,24 @@ def synchronize_file_targets():
         sf_count = sum(1 for f in sf_pool if get_base(f) == base)
         
         if hs_count == 1 and sf_count == 1:
-            matches[base] = {
-                "hs": os.path.join(RESULTS_MATCH_HS, hs_filename),
-                "sf": os.path.join(RESULTS_MATCH_SF, hs_filename),
-                "status_pdf": "pending",
-                "status_excel": "pending"
-            }
-            shutil.move(os.path.join(hs_dir, hs_filename), os.path.join(RESULTS_MATCH_HS, hs_filename))
-            shutil.move(os.path.join(sf_dir, sf_filename), os.path.join(RESULTS_MATCH_SF, sf_filename))
-            hs_pool.remove(hs_filename)
-            sf_pool.remove(sf_filename)
+            try:
+                hs_src = os.path.join(hs_dir, hs_filename)
+                sf_src = os.path.join(sf_dir, sf_filename)
+                hs_dst = os.path.join(RESULTS_MATCH_HS, hs_filename)
+                sf_dst = os.path.join(RESULTS_MATCH_SF, sf_filename)
+                shutil.move(hs_src, hs_dst)
+                shutil.move(sf_src, sf_dst)
+                matches[base] = {
+                    "hs": hs_dst,
+                    "sf": sf_dst,
+                    "status_pdf": "pending",
+                    "status_excel": "pending"
+                }
+                print(f"   Phase 2 Match: [{hs_filename}] <-> [{sf_filename}]")
+                hs_pool.remove(hs_filename)
+                sf_pool.remove(sf_filename)
+            except Exception as e:
+                print(f"   ⚠️ Skipping {base}: {e}")
 
     # --- Phase 3: Orphan Processing ---
     ORPHAN_HS = os.path.join(hs_dir, "UNMATCHED_PAIRS")

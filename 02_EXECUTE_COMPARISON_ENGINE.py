@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import platform
+import subprocess
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 from datetime import datetime
@@ -52,6 +53,15 @@ def generate_side_by_side_pdf(hs_path, sf_path, output_name):
         print(f"   ❌ Generation failed: {e}")
         return False
 
+def _paste_path(filepath):
+    """Copy path to clipboard and paste it, handling special characters reliably."""
+    if platform.system() == "Darwin":
+        subprocess.run(['pbcopy'], input=filepath.encode('utf-8'), check=True)
+        pyautogui.hotkey('command', 'v')
+    else:
+        subprocess.run(['clip'], input=filepath.encode('utf-8'), check=True)
+        pyautogui.hotkey('ctrl', 'v')
+
 def upload_sequence(coords, hs_path, sf_path):
     """Execute the file upload automation sequence with Cross-Platform support."""
     is_mac = platform.system() == "Darwin"
@@ -64,7 +74,7 @@ def upload_sequence(coords, hs_path, sf_path):
     if is_mac:
         pyautogui.hotkey('command', 'shift', 'g')
         time.sleep(1.0)
-    pyautogui.write(hs_path)
+    _paste_path(hs_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
@@ -76,7 +86,7 @@ def upload_sequence(coords, hs_path, sf_path):
     if is_mac:
         pyautogui.hotkey('command', 'shift', 'g')
         time.sleep(1.0)
-    pyautogui.write(sf_path)
+    _paste_path(sf_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
@@ -93,18 +103,23 @@ def calibrate_mode():
         return
     with open(TARGETS_FILE, "r") as f:
         meta = json.load(f)
-        matches = meta.get("matches", {})
-        test_hs, test_sf, found_diff = "", "", False
-        for name, paths in matches.items():
-            try:
-                with open(paths['hs'], 'rb') as f1, open(paths['sf'], 'rb') as f2:
-                    if f1.read() != f2.read():
-                        test_hs, test_sf, found_diff = paths['hs'], paths['sf'], True
-                        break
-            except Exception: continue
-        if not found_diff:
-            first_key = list(matches.keys())[0]
-            test_hs, test_sf = matches[first_key]["hs"], matches[first_key]["sf"]
+
+    matches = meta.get("matches", {})
+    if not matches:
+        print("Error: No matched pairs found in targets.json.")
+        return
+
+    test_hs, test_sf, found_diff = "", "", False
+    for name, paths in matches.items():
+        try:
+            with open(paths['hs'], 'rb') as f1, open(paths['sf'], 'rb') as f2:
+                if f1.read() != f2.read():
+                    test_hs, test_sf, found_diff = paths['hs'], paths['sf'], True
+                    break
+        except Exception: continue
+    if not found_diff:
+        first_key = list(matches.keys())[0]
+        test_hs, test_sf = matches[first_key]["hs"], matches[first_key]["sf"]
 
     new_config = {}
     try:
