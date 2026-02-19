@@ -52,6 +52,15 @@ def generate_side_by_side_pdf(hs_path, sf_path, output_name):
         print(f"   ❌ Generation failed: {e}")
         return False
 
+def type_path(path):
+    """Type a file path character by character, handling underscore on macOS."""
+    for char in path:
+        if char == '_':
+            pyautogui.hotkey('shift', 'minus')
+        else:
+            pyautogui.write(char)
+        time.sleep(0.02)
+
 def upload_sequence(coords, hs_path, sf_path):
     """Execute the file upload automation sequence with Cross-Platform support."""
     is_mac = platform.system() == "Darwin"
@@ -64,7 +73,7 @@ def upload_sequence(coords, hs_path, sf_path):
     if is_mac:
         pyautogui.hotkey('command', 'shift', 'g')
         time.sleep(1.0)
-    pyautogui.write(hs_path)
+    type_path(hs_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
@@ -76,7 +85,7 @@ def upload_sequence(coords, hs_path, sf_path):
     if is_mac:
         pyautogui.hotkey('command', 'shift', 'g')
         time.sleep(1.0)
-    pyautogui.write(sf_path)
+    type_path(sf_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
