@@ -4,7 +4,6 @@ import json
 import os
 import sys
 import platform
-import subprocess
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 from datetime import datetime
@@ -53,15 +52,6 @@ def generate_side_by_side_pdf(hs_path, sf_path, output_name):
         print(f"   ❌ Generation failed: {e}")
         return False
 
-def _paste_path(filepath):
-    """Copy path to clipboard and paste it, handling special characters reliably."""
-    if platform.system() == "Darwin":
-        subprocess.run(['pbcopy'], input=filepath.encode('utf-8'), check=True)
-        pyautogui.hotkey('command', 'v')
-    else:
-        subprocess.run(['clip'], input=filepath.encode('utf-8'), check=True)
-        pyautogui.hotkey('ctrl', 'v')
-
 def upload_sequence(coords, hs_path, sf_path):
     """Execute the file upload automation sequence with Cross-Platform support."""
     is_mac = platform.system() == "Darwin"
@@ -74,7 +64,7 @@ def upload_sequence(coords, hs_path, sf_path):
     if is_mac:
         pyautogui.hotkey('command', 'shift', 'g')
         time.sleep(1.0)
-    _paste_path(hs_path)
+    pyautogui.write(hs_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
@@ -86,7 +76,7 @@ def upload_sequence(coords, hs_path, sf_path):
     if is_mac:
         pyautogui.hotkey('command', 'shift', 'g')
         time.sleep(1.0)
-    _paste_path(sf_path)
+    pyautogui.write(sf_path)
     time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(0.5)
